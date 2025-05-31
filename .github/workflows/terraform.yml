@@ -1,0 +1,152 @@
+---
+name: terraform
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches:
+      - '*'
+    tags:
+      - 'v?[0-9]+.[0-9]+.[0-9]+'
+  schedule:
+    - cron: '0 7 * * 1,3,5'
+  workflow_dispatch:
+
+jobs:
+  locate:
+    name: Locate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build Matrix
+        id: matrix
+        run: |
+          DIRS=$(python -c "import json; import glob; print(json.dumps([x.replace('/versions.tf', '') for x in glob.glob('./**/versions.tf', recursive=True)]))")
+          echo directories=$DIRS >> $GITHUB_OUTPUT
+    outputs:
+      directories: ${{ steps.matrix.outputs.directories }}
+
+  versions:
+    name: Versions
+    runs-on: ubuntu-latest
+    needs: [ locate ]
+    strategy:
+      matrix:
+        directory: ${{ fromJson(needs.locate.outputs.directories) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Terraform min/max versions
+        id: versions
+        uses: clowdhaus/terraform-min-max@v1.3.1
+        with:
+          directory: ${{ matrix.directory }}
+    outputs:
+      minVersion: ${{ steps.versions.outputs.minVersion }}
+      maxVersion: ${{ steps.versions.outputs.maxVersion }}
+
+  validate_min:
+    name: Validate Minimum
+    runs-on: ubuntu-latest
+    container: hansohn/terraform-aws:latest
+    needs: [ locate, versions ]
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJson(needs.locate.outputs.directories) }}
+        version:
+          - ${{ needs.versions.outputs.minVersion }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Terraform v${{ matrix.version }}
+        run: tfget ${{ matrix.version }}
+
+      - name: Validate
+        run: |
+            cd ${{ matrix.directory }}
+            terraform init --backend=false
+            terraform validate
+
+  validate_max:
+    name: Validate Maximum
+    runs-on: ubuntu-latest
+    container: hansohn/terraform-aws:latest
+    needs: [ locate, versions ]
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJson(needs.locate.outputs.directories) }}
+        version:
+          - ${{ needs.versions.outputs.maxVersion }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Terraform v${{ matrix.version }}
+        run: tfget ${{ matrix.version }}
+
+      - name: Terraform Format
+        run: |
+            cd ${{ matrix.directory }}
+            terraform fmt --check
+
+      - name: Validate
+        run: |
+            cd ${{ matrix.directory }}
+            terraform init --backend=false
+            terraform validate
+
+      - name: Lint
+        run: |
+            tflint \
+              --chdir=${{ matrix.directory }} \
+              --only=terraform_comment_syntax \
+              --only=terraform_deprecated_index \
+              --only=terraform_deprecated_interpolation \
+              --only=terraform_documented_outputs \
+              --only=terraform_documented_variables \
+              --only=terraform_module_pinned_source \
+              --only=terraform_naming_convention \
+              --only=terraform_required_providers \
+              --only=terraform_required_version \
+              --only=terraform_typed_variables \
+              --only=terraform_workspace_remote
+
+      - name: Terraform Docs
+        if: ${{ !startsWith(matrix.directory, './examples/') }}
+        run: |
+            terraform-docs \
+              --lockfile=false \
+              --output-check=true \
+              --output-file README.md \
+              --output-mode inject \
+              markdown table \
+              ${{ matrix.directory }}
+
+  slack:
+    name: Slack
+    runs-on: ubuntu-latest
+    needs: [ locate, versions, validate_min, validate_max ]
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Slack Notification
+        uses: Gamesight/slack-workflow-status@master
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          channel: ${{ secrets.SLACK_CHANNEL_ID }}
+          name: ${{ secrets.SLACK_USERNAME }}
+          icon_url: "https://cdn-icons-png.flaticon.com/512/25/25231.png"
