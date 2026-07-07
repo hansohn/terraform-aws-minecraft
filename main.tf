@@ -11,6 +11,10 @@ data "aws_availability_zones" "available" {
 locals {
   name = var.name
 
+  # Compute region — where the ECS service runs. Used for the awslogs driver and
+  # passed to the us-east-1 launcher Lambda so it targets the right region.
+  region = data.aws_region.current.region
+
   # Two AZs for EFS mount-target redundancy; the task itself runs in one.
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
 

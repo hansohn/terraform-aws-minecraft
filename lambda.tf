@@ -33,7 +33,7 @@ resource "aws_lambda_function" "launcher" {
 
   environment {
     variables = {
-      REGION  = data.aws_region.current.name
+      REGION  = local.region
       CLUSTER = aws_ecs_cluster.this.name
       SERVICE = aws_ecs_service.this.name
     }
