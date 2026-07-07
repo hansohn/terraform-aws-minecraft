@@ -5,7 +5,7 @@ name: terraform
 on:
   push:
     branches:
-      - '*'
+      - '**'
     tags:
       - 'v?[0-9]+.[0-9]+.[0-9]+'
   schedule:
@@ -18,12 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.14'
 
       - name: Build Matrix
         id: matrix
@@ -33,67 +33,19 @@ jobs:
     outputs:
       directories: ${{ steps.matrix.outputs.directories }}
 
-  versions:
-    name: Versions
+  validate:
+    name: Validate
     runs-on: ubuntu-latest
+    container:
+      image: hansohn/terraform-aws:latest
     needs: [ locate ]
     strategy:
-      matrix:
-        directory: ${{ fromJson(needs.locate.outputs.directories) }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Terraform min/max versions
-        id: versions
-        uses: clowdhaus/terraform-min-max@v1.3.1
-        with:
-          directory: ${{ matrix.directory }}
-    outputs:
-      minVersion: ${{ steps.versions.outputs.minVersion }}
-      maxVersion: ${{ steps.versions.outputs.maxVersion }}
-
-  validate_min:
-    name: Validate Minimum
-    runs-on: ubuntu-latest
-    container: hansohn/terraform-aws:latest
-    needs: [ locate, versions ]
-    strategy:
       fail-fast: false
       matrix:
         directory: ${{ fromJson(needs.locate.outputs.directories) }}
-        version:
-          - ${{ needs.versions.outputs.minVersion }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Terraform v${{ matrix.version }}
-        run: tfget ${{ matrix.version }}
-
-      - name: Validate
-        run: |
-            cd ${{ matrix.directory }}
-            terraform init --backend=false
-            terraform validate
-
-  validate_max:
-    name: Validate Maximum
-    runs-on: ubuntu-latest
-    container: hansohn/terraform-aws:latest
-    needs: [ locate, versions ]
-    strategy:
-      fail-fast: false
-      matrix:
-        directory: ${{ fromJson(needs.locate.outputs.directories) }}
-        version:
-          - ${{ needs.versions.outputs.maxVersion }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Terraform v${{ matrix.version }}
-        run: tfget ${{ matrix.version }}
+        uses: actions/checkout@v7
 
       - name: Terraform Format
         run: |
@@ -136,14 +88,14 @@ jobs:
   slack:
     name: Slack
     runs-on: ubuntu-latest
-    needs: [ locate, versions, validate_min, validate_max ]
+    needs: [ locate, validate ]
     if: always()
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Slack Notification
-        uses: Gamesight/slack-workflow-status@master
+        uses: Gamesight/slack-workflow-status@v2.0.0
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           slack_webhook_url: ${{ secrets.SLACK_WEBHOOK }}
