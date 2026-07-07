@@ -1,4 +1,110 @@
-#--------------------------------------------------------------
+################################################################################
 # Variables
-#--------------------------------------------------------------
+################################################################################
 
+variable "name" {
+  type        = string
+  default     = "minecraft"
+  description = "Name prefix applied to all resources."
+}
+
+variable "domain_name" {
+  type        = string
+  description = "Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. \"minecraft.hansohn.io\"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name_servers output."
+}
+
+variable "vpc_cidr" {
+  type        = string
+  default     = "10.100.0.0/24"
+  description = "CIDR block for the VPC that hosts the server."
+}
+
+variable "task_cpu" {
+  type        = number
+  default     = 2048
+  description = "Fargate task vCPU units (2048 = 2 vCPU). Must be a valid Fargate CPU/memory pairing."
+}
+
+variable "task_memory" {
+  type        = number
+  default     = 16384
+  description = "Fargate task memory in MiB (16384 = 16 GB)."
+}
+
+variable "java_memory" {
+  type        = string
+  default     = "10G"
+  description = "Heap size passed to itzg/minecraft-server via MEMORY. Keep it below task_memory to leave headroom for JVM metaspace/native memory and the watchdog sidecar."
+}
+
+variable "use_spot" {
+  type        = bool
+  default     = true
+  description = "Run the task on Fargate Spot (much cheaper; rare interruptions just restart the server). Spot is x86 only."
+}
+
+variable "cpu_architecture" {
+  type        = string
+  default     = "X86_64"
+  description = "Task CPU architecture. Fargate Spot only supports X86_64; use ARM64 only with use_spot = false."
+}
+
+variable "minecraft_image" {
+  type        = string
+  default     = "itzg/minecraft-server:latest"
+  description = "Minecraft server container image."
+}
+
+variable "watchdog_image" {
+  type        = string
+  default     = "doctorray/minecraft-ecsfargate-watchdog:latest"
+  description = "Watchdog sidecar image that points DNS at the task on boot and scales the service to zero when idle."
+}
+
+variable "minecraft_port" {
+  type        = number
+  default     = 25565
+  description = "TCP port the Java server listens on."
+}
+
+variable "minecraft_env" {
+  type        = map(string)
+  default     = {}
+  description = "Extra environment variables for itzg/minecraft-server (e.g. TYPE, VERSION, MODPACK, AUTO_CURSEFORGE settings, CF_API_KEY). Merged over the EULA/MEMORY defaults."
+}
+
+variable "startup_minutes" {
+  type        = number
+  default     = 10
+  description = "Grace period (minutes) the watchdog waits for a first connection before it may shut the server down."
+}
+
+variable "shutdown_minutes" {
+  type        = number
+  default     = 20
+  description = "Idle time (minutes) with no players before the watchdog scales the service to zero."
+}
+
+variable "efs_throughput_mode" {
+  type        = string
+  default     = "bursting"
+  description = "EFS throughput mode. Use \"bursting\" or \"elastic\"; avoid \"provisioned\" to keep costs down."
+}
+
+variable "log_retention_days" {
+  type        = number
+  default     = 7
+  description = "CloudWatch Logs retention for container, DNS query, and Lambda logs."
+}
+
+variable "notification_email" {
+  type        = string
+  default     = ""
+  description = "If set, subscribes this email address to the SNS topic for start/stop notifications."
+}
+
+variable "tags" {
+  type        = map(string)
+  default     = {}
+  description = "Additional tags applied to all resources."
+}
