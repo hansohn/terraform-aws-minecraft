@@ -1,0 +1,31 @@
+# Accepted trivy misconfigurations for terraform-aws-minecraft.
+#
+# This is a low-cost, personal, scale-to-zero Minecraft server. The findings
+# below are deliberate design tradeoffs, not exposures. Runtime security relies
+# on the game-port-only ingress security group plus the Minecraft whitelist and
+# online-mode (see README), not on network isolation.
+
+# AWS-0104: Egress to 0.0.0.0/0 is required — the container pulls its image and
+# reaches Mojang/Microsoft auth and mod sources over the public internet.
+AVD-AWS-0104
+
+# AWS-0164: Public IP on the task subnet is intentional. The design avoids a NAT
+# gateway (~$32/mo) and the watchdog points DNS at the task's public IP. Inbound
+# is restricted to the single game port.
+AVD-AWS-0164
+
+# AWS-0178: VPC flow logs omitted — added log-storage cost for negligible value
+# on a single-task VPC.
+AVD-AWS-0178
+
+# AWS-0017: CloudWatch log groups use default AWS-managed encryption at rest. A
+# customer-managed KMS key adds cost and key management not warranted for game,
+# DNS-query, and launcher logs.
+AVD-AWS-0017
+
+# AWS-0034: Container Insights left disabled to avoid extra CloudWatch cost on a
+# personal server.
+AVD-AWS-0034
+
+# AWS-0066: X-Ray tracing omitted on the tiny start/stop launcher Lambda.
+AVD-AWS-0066

@@ -4,7 +4,9 @@
 
 resource "aws_sns_topic" "this" {
   name_prefix = "${local.name}-"
-  tags        = local.tags
+  # Server-side encryption with the AWS-managed SNS key (no extra cost).
+  kms_master_key_id = "alias/aws/sns"
+  tags              = local.tags
 }
 
 resource "aws_sns_topic_subscription" "email" {
