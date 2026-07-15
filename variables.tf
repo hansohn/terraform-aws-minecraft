@@ -103,6 +103,13 @@ variable "efs_throughput_mode" {
   description = "EFS throughput mode. Use \"bursting\" or \"elastic\"; avoid \"provisioned\" to keep costs down."
 }
 
+variable "discord_webhook_url" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF_VAR_discord_webhook_url; keep it out of version control."
+}
+
 variable "allowed_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
