@@ -23,3 +23,10 @@ variable "notification_email" {
   default     = ""
   description = "Optional email for start/stop notifications."
 }
+
+variable "discord_webhook_url" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Optional Discord webhook for start/stop notifications. Pass via TF_VAR_discord_webhook_url; do not commit it."
+}
