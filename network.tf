@@ -65,6 +65,16 @@ resource "aws_vpc_security_group_ingress_rule" "server_game" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
+resource "aws_vpc_security_group_ingress_rule" "server_bedrock" {
+  count             = var.enable_bedrock ? 1 : 0
+  security_group_id = aws_security_group.server.id
+  description       = "Geyser / Bedrock"
+  from_port         = var.bedrock_port
+  to_port           = var.bedrock_port
+  ip_protocol       = "udp"
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
 resource "aws_vpc_security_group_egress_rule" "server_all" {
   security_group_id = aws_security_group.server.id
   description       = "Allow all outbound"

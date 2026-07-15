@@ -67,6 +67,18 @@ variable "minecraft_port" {
   description = "TCP port the Java server listens on."
 }
 
+variable "bedrock_port" {
+  type        = number
+  default     = 19132
+  description = "UDP port for Bedrock clients via Geyser. Set enable_bedrock = true to open it."
+}
+
+variable "enable_bedrock" {
+  type        = bool
+  default     = false
+  description = "Open the Bedrock UDP port (bedrock_port) for Geyser. Enable when running the Geyser plugin so Bedrock clients can connect."
+}
+
 variable "minecraft_env" {
   type        = map(string)
   default     = {}

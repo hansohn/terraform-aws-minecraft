@@ -62,11 +62,18 @@ resource "aws_ecs_task_definition" "this" {
       essential   = true
       environment = [for k, v in local.minecraft_environment : { name = k, value = v }]
 
-      portMappings = [{
-        containerPort = var.minecraft_port
-        hostPort      = var.minecraft_port
-        protocol      = "tcp"
-      }]
+      portMappings = concat(
+        [{
+          containerPort = var.minecraft_port
+          hostPort      = var.minecraft_port
+          protocol      = "tcp"
+        }],
+        var.enable_bedrock ? [{
+          containerPort = var.bedrock_port
+          hostPort      = var.bedrock_port
+          protocol      = "udp"
+        }] : [],
+      )
 
       mountPoints = [{
         sourceVolume  = "data"
