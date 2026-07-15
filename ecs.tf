@@ -132,7 +132,7 @@ resource "aws_ecs_service" "this" {
   }
 
   network_configuration {
-    subnets          = aws_subnet.public[*].id
+    subnets          = local.subnet_ids
     security_groups  = [aws_security_group.server.id]
     assign_public_ip = true
   }
@@ -140,6 +140,11 @@ resource "aws_ecs_service" "this" {
   # desired_count is driven at runtime by the launcher Lambda and watchdog.
   lifecycle {
     ignore_changes = [desired_count]
+
+    precondition {
+      condition     = var.create_vpc || (var.vpc_id != "" && length(var.subnet_ids) > 0)
+      error_message = "When create_vpc = false, set vpc_id and at least one entry in subnet_ids (public subnets, distinct AZs)."
+    }
   }
 
   depends_on = [aws_ecs_cluster_capacity_providers.this]

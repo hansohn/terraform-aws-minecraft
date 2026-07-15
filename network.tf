@@ -6,7 +6,10 @@
 # server itself).
 ################################################################################
 
+# VPC/subnets/routing are created only when create_vpc = true. Otherwise the
+# task and EFS attach to caller-supplied vpc_id / subnet_ids (see locals).
 resource "aws_vpc" "this" {
+  count                = var.create_vpc ? 1 : 0
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
@@ -14,13 +17,14 @@ resource "aws_vpc" "this" {
 }
 
 resource "aws_internet_gateway" "this" {
-  vpc_id = aws_vpc.this.id
+  count  = var.create_vpc ? 1 : 0
+  vpc_id = aws_vpc.this[0].id
   tags   = merge(local.tags, { Name = local.name })
 }
 
 resource "aws_subnet" "public" {
-  count                   = length(local.azs)
-  vpc_id                  = aws_vpc.this.id
+  count                   = var.create_vpc ? length(local.azs) : 0
+  vpc_id                  = aws_vpc.this[0].id
   availability_zone       = local.azs[count.index]
   cidr_block              = cidrsubnet(var.vpc_cidr, 2, count.index)
   map_public_ip_on_launch = true
@@ -28,11 +32,12 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.this.id
+  count  = var.create_vpc ? 1 : 0
+  vpc_id = aws_vpc.this[0].id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.this.id
+    gateway_id = aws_internet_gateway.this[0].id
   }
 
   tags = merge(local.tags, { Name = "${local.name}-public" })
@@ -41,14 +46,14 @@ resource "aws_route_table" "public" {
 resource "aws_route_table_association" "public" {
   count          = length(aws_subnet.public)
   subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
+  route_table_id = aws_route_table.public[0].id
 }
 
 # Security group for the game server task.
 resource "aws_security_group" "server" {
   name_prefix = "${local.name}-server-"
   description = "Minecraft server task"
-  vpc_id      = aws_vpc.this.id
+  vpc_id      = local.vpc_id
   tags        = merge(local.tags, { Name = "${local.name}-server" })
 
   lifecycle {

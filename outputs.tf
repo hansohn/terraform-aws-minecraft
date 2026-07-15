@@ -38,6 +38,6 @@ output "sns_topic_arn" {
 }
 
 output "vpc_id" {
-  description = "VPC ID."
-  value       = aws_vpc.this.id
+  description = "VPC ID hosting the server (created or caller-supplied)."
+  value       = local.vpc_id
 }
