@@ -19,8 +19,9 @@
 
 ## :open_book: Usage
 
-This module runs a Minecraft (Java) server on **ECS Fargate that scales to
-zero** — you only pay for compute while someone is actually playing. When a
+This module runs a Minecraft server (Java or Bedrock) on **ECS Fargate that
+scales to zero** — you only pay for compute while someone is actually playing.
+When a
 player resolves the server's hostname, a Route53 DNS-query log triggers a Lambda
 that starts the task; a watchdog sidecar points DNS at the task on boot and
 shuts the server back down after a configurable idle period. World data persists
@@ -56,6 +57,35 @@ module "minecraft" {
 After `apply`, delegate the subdomain to Route53 by adding the `name_servers`
 output as `NS` records at your parent domain's DNS provider (e.g. Cloudflare),
 **DNS-only / unproxied**. Players then connect to `domain_name`.
+
+### Optional features
+
+```hcl
+module "minecraft" {
+  source      = "hansohn/minecraft/aws"
+  domain_name = "minecraft.example.com"
+
+  # Let Bedrock clients join a Java server via the Geyser plugin (opens UDP 19132).
+  enable_geyser = true
+  minecraft_env = { TYPE = "PAPER", MODRINTH_PROJECTS = "geyser,floodgate" }
+
+  # ...or run a native Bedrock server instead of Java (UDP 19132):
+  # server_edition = "bedrock"
+
+  # Restrict who can connect (default is open to the internet).
+  allowed_cidrs = ["203.0.113.4/32"]
+
+  # Point-in-time EFS backups are ON by default; tune retention or disable.
+  backup_retention_days = 14
+
+  # Repost start/stop notifications to Discord (pass the URL as a secret).
+  # discord_webhook_url = var.discord_webhook_url
+}
+```
+
+> **Upgrading to v0.4.0:** `enable_bedrock` was renamed to **`enable_geyser`**
+> to distinguish the Java-side Geyser add-on from running a native Bedrock
+> server (`server_edition = "bedrock"`). Rename the input when you upgrade.
 
 ## :sparkles: Examples
 
