@@ -103,6 +103,12 @@ variable "efs_throughput_mode" {
   description = "EFS throughput mode. Use \"bursting\" or \"elastic\"; avoid \"provisioned\" to keep costs down."
 }
 
+variable "allowed_cidrs" {
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+  description = "CIDR blocks allowed to reach the game port(s). Defaults to open (0.0.0.0/0); narrow to known player IPs to lock the server down. Note the port must stay reachable from wherever players connect for the wake-on-DNS launcher to trigger."
+}
+
 variable "enable_backups" {
   type        = bool
   default     = true

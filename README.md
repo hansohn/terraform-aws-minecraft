@@ -68,6 +68,7 @@ Please see the sample set of examples below for a better understanding of implem
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_allowed_cidrs"></a> [allowed\_cidrs](#input\_allowed\_cidrs) | CIDR blocks allowed to reach the game port(s). Defaults to open (0.0.0.0/0); narrow to known player IPs to lock the server down. Note the port must stay reachable from wherever players connect for the wake-on-DNS launcher to trigger. | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
 | <a name="input_backup_retention_days"></a> [backup\_retention\_days](#input\_backup\_retention\_days) | Days to retain each EFS backup recovery point when enable\_backups is true. | `number` | `35` | no |
 | <a name="input_backup_schedule"></a> [backup\_schedule](#input\_backup\_schedule) | Cron schedule (UTC) for EFS backups when enable\_backups is true. Defaults to daily at 05:00 UTC. | `string` | `"cron(0 5 * * ? *)"` | no |
 | <a name="input_bedrock_port"></a> [bedrock\_port](#input\_bedrock\_port) | UDP port for Bedrock clients via Geyser. Set enable\_bedrock = true to open it. | `number` | `19132` | no |

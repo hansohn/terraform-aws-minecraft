@@ -56,23 +56,25 @@ resource "aws_security_group" "server" {
   }
 }
 
+# One rule per allowed CIDR (default 0.0.0.0/0 = open to the internet).
 resource "aws_vpc_security_group_ingress_rule" "server_game" {
+  for_each          = toset(var.allowed_cidrs)
   security_group_id = aws_security_group.server.id
   description       = "Minecraft Java"
   from_port         = var.minecraft_port
   to_port           = var.minecraft_port
   ip_protocol       = "tcp"
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = each.value
 }
 
 resource "aws_vpc_security_group_ingress_rule" "server_bedrock" {
-  count             = var.enable_bedrock ? 1 : 0
+  for_each          = var.enable_bedrock ? toset(var.allowed_cidrs) : toset([])
   security_group_id = aws_security_group.server.id
   description       = "Geyser / Bedrock"
   from_port         = var.bedrock_port
   to_port           = var.bedrock_port
   ip_protocol       = "udp"
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = each.value
 }
 
 resource "aws_vpc_security_group_egress_rule" "server_all" {
