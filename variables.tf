@@ -103,6 +103,24 @@ variable "efs_throughput_mode" {
   description = "EFS throughput mode. Use \"bursting\" or \"elastic\"; avoid \"provisioned\" to keep costs down."
 }
 
+variable "enable_backups" {
+  type        = bool
+  default     = true
+  description = "Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; this guards against corruption, griefing, or accidental deletion."
+}
+
+variable "backup_schedule" {
+  type        = string
+  default     = "cron(0 5 * * ? *)"
+  description = "Cron schedule (UTC) for EFS backups when enable_backups is true. Defaults to daily at 05:00 UTC."
+}
+
+variable "backup_retention_days" {
+  type        = number
+  default     = 35
+  description = "Days to retain each EFS backup recovery point when enable_backups is true."
+}
+
 variable "log_retention_days" {
   type        = number
   default     = 7
