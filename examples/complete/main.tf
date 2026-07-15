@@ -13,23 +13,40 @@ module "minecraft" {
 
   domain_name = var.domain_name
 
-  # Modded server for ~4-5 players on Fargate Spot.
+  # Paper server for ~4-5 players on Fargate Spot.
   task_cpu    = 2048
   task_memory = 16384
   java_memory = "10G"
   use_spot    = true
 
-  # Configure the modpack via itzg/minecraft-server env vars. Example using
-  # CurseForge auto-install (needs a free CF_API_KEY):
-  #
+  # Paper + Geyser/Floodgate so Bedrock clients can join the Java world
+  # (opens UDP 19132). itzg auto-installs the plugins from Modrinth.
+  enable_geyser = true
+  minecraft_env = {
+    TYPE              = "PAPER"
+    MODRINTH_PROJECTS = "geyser,floodgate"
+  }
+
+  # ...or run a native Bedrock server instead of Java (UDP 19132):
+  # server_edition = "bedrock"
+
+  # Configure a modpack instead via itzg env vars, e.g. CurseForge auto-install:
   # minecraft_env = {
-  #   TYPE           = "AUTO_CURSEFORGE"
-  #   CF_API_KEY     = "your-curseforge-api-key"
-  #   CF_SLUG        = "all-the-mods-9"
-  #   ALLOW_FLIGHT   = "TRUE"
+  #   TYPE       = "AUTO_CURSEFORGE"
+  #   CF_API_KEY = "your-curseforge-api-key"
+  #   CF_SLUG    = "all-the-mods-9"
   # }
 
-  notification_email = var.notification_email
+  # Restrict who can connect (default is open to the internet).
+  # allowed_cidrs = ["203.0.113.4/32"]
+
+  # Point-in-time EFS backups (opt-in); enable and optionally tune retention.
+  enable_backups        = true
+  backup_retention_days = 14
+
+  # Notifications: email via SNS, and/or repost to Discord (pass as a secret).
+  notification_email  = var.notification_email
+  discord_webhook_url = var.discord_webhook_url
 
   tags = {
     Environment = "personal"
