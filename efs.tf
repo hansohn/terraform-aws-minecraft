@@ -8,7 +8,7 @@
 resource "aws_security_group" "efs" {
   name_prefix = "${local.name}-efs-"
   description = "EFS mount targets for Minecraft"
-  vpc_id      = aws_vpc.this.id
+  vpc_id      = local.vpc_id
   tags        = merge(local.tags, { Name = "${local.name}-efs" })
 
   lifecycle {
@@ -37,9 +37,9 @@ resource "aws_efs_file_system" "this" {
 }
 
 resource "aws_efs_mount_target" "this" {
-  count           = length(aws_subnet.public)
+  count           = length(local.subnet_ids)
   file_system_id  = aws_efs_file_system.this.id
-  subnet_id       = aws_subnet.public[count.index].id
+  subnet_id       = local.subnet_ids[count.index]
   security_groups = [aws_security_group.efs.id]
 }
 

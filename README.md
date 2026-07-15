@@ -81,6 +81,12 @@ module "minecraft" {
 
   # Repost start/stop notifications to Discord (pass the URL as a secret).
   # discord_webhook_url = var.discord_webhook_url
+
+  # Deploy into an existing VPC instead of creating one. Subnets must be
+  # PUBLIC (route to an IGW) and in distinct AZs.
+  # create_vpc = false
+  # vpc_id     = "vpc-0123456789abcdef0"
+  # subnet_ids = ["subnet-aaa", "subnet-bbb"]
 }
 ```
 
@@ -104,6 +110,7 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_backup_schedule"></a> [backup\_schedule](#input\_backup\_schedule) | Cron schedule (UTC) for EFS backups when enable\_backups is true. Defaults to daily at 05:00 UTC. | `string` | `"cron(0 5 * * ? *)"` | no |
 | <a name="input_bedrock_port"></a> [bedrock\_port](#input\_bedrock\_port) | UDP port opened for Bedrock clients via the Geyser plugin. Only used on a java server with enable\_geyser = true. | `number` | `19132` | no |
 | <a name="input_cpu_architecture"></a> [cpu\_architecture](#input\_cpu\_architecture) | Task CPU architecture. Fargate Spot only supports X86\_64; use ARM64 only with use\_spot = false. | `string` | `"X86_64"` | no |
+| <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create a dedicated VPC (with public subnets, IGW, and routing). Set false to deploy into an existing VPC via vpc\_id + subnet\_ids. | `bool` | `true` | no |
 | <a name="input_discord_webhook_url"></a> [discord\_webhook\_url](#input\_discord\_webhook\_url) | Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF\_VAR\_discord\_webhook\_url; keep it out of version control. | `string` | `""` | no |
 | <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. "minecraft.hansohn.io"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name\_servers output. | `string` | n/a | yes |
 | <a name="input_efs_throughput_mode"></a> [efs\_throughput\_mode](#input\_efs\_throughput\_mode) | EFS throughput mode. Use "bursting" or "elastic"; avoid "provisioned" to keep costs down. | `string` | `"bursting"` | no |
@@ -119,11 +126,13 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_server_edition"></a> [server\_edition](#input\_server\_edition) | Minecraft edition to run. "java" listens on TCP (minecraft\_port); "bedrock" runs a native Bedrock server on UDP 19132. Drives the game port protocol and the default container image. | `string` | `"java"` | no |
 | <a name="input_shutdown_minutes"></a> [shutdown\_minutes](#input\_shutdown\_minutes) | Idle time (minutes) with no players before the watchdog scales the service to zero. | `number` | `20` | no |
 | <a name="input_startup_minutes"></a> [startup\_minutes](#input\_startup\_minutes) | Grace period (minutes) the watchdog waits for a first connection before it may shut the server down. | `number` | `10` | no |
+| <a name="input_subnet_ids"></a> [subnet\_ids](#input\_subnet\_ids) | Existing subnet IDs when create\_vpc = false. Must be PUBLIC (route to an internet gateway) — the task needs a public IP for wake-on-DNS — and each in a distinct AZ (EFS allows one mount target per AZ). Ignored when create\_vpc = true. | `list(string)` | `[]` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Additional tags applied to all resources. | `map(string)` | `{}` | no |
 | <a name="input_task_cpu"></a> [task\_cpu](#input\_task\_cpu) | Fargate task vCPU units (2048 = 2 vCPU). Must be a valid Fargate CPU/memory pairing. | `number` | `2048` | no |
 | <a name="input_task_memory"></a> [task\_memory](#input\_task\_memory) | Fargate task memory in MiB (16384 = 16 GB). | `number` | `16384` | no |
 | <a name="input_use_spot"></a> [use\_spot](#input\_use\_spot) | Run the task on Fargate Spot (much cheaper; rare interruptions just restart the server). Spot is x86 only. | `bool` | `true` | no |
-| <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | CIDR block for the VPC that hosts the server. | `string` | `"10.100.0.0/24"` | no |
+| <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | CIDR block for the VPC. Only used when create\_vpc = true. | `string` | `"10.100.0.0/24"` | no |
+| <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | Existing VPC to deploy into when create\_vpc = false. Ignored when create\_vpc = true. | `string` | `""` | no |
 | <a name="input_watchdog_image"></a> [watchdog\_image](#input\_watchdog\_image) | Watchdog sidecar image that points DNS at the task on boot and scales the service to zero when idle. | `string` | `"doctorray/minecraft-ecsfargate-watchdog:latest"` | no |
 
 ## Outputs
@@ -137,7 +146,7 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="output_name_servers"></a> [name\_servers](#output\_name\_servers) | Route53 name servers for the delegated zone. Create NS records for this subdomain at your parent-domain DNS provider (Cloudflare), DNS-only / unproxied. |
 | <a name="output_server_address"></a> [server\_address](#output\_server\_address) | Hostname players connect to. |
 | <a name="output_sns_topic_arn"></a> [sns\_topic\_arn](#output\_sns\_topic\_arn) | SNS topic ARN for start/stop notifications. |
-| <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | VPC ID. |
+| <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | VPC ID hosting the server (created or caller-supplied). |
 <!-- END_TF_DOCS -->
 
 <!-- MARKDOWN LINKS & IMAGES -->

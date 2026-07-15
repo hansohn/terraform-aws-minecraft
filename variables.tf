@@ -13,10 +13,28 @@ variable "domain_name" {
   description = "Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. \"minecraft.hansohn.io\"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name_servers output."
 }
 
+variable "create_vpc" {
+  type        = bool
+  default     = true
+  description = "Create a dedicated VPC (with public subnets, IGW, and routing). Set false to deploy into an existing VPC via vpc_id + subnet_ids."
+}
+
+variable "vpc_id" {
+  type        = string
+  default     = ""
+  description = "Existing VPC to deploy into when create_vpc = false. Ignored when create_vpc = true."
+}
+
+variable "subnet_ids" {
+  type        = list(string)
+  default     = []
+  description = "Existing subnet IDs when create_vpc = false. Must be PUBLIC (route to an internet gateway) — the task needs a public IP for wake-on-DNS — and each in a distinct AZ (EFS allows one mount target per AZ). Ignored when create_vpc = true."
+}
+
 variable "vpc_cidr" {
   type        = string
   default     = "10.100.0.0/24"
-  description = "CIDR block for the VPC that hosts the server."
+  description = "CIDR block for the VPC. Only used when create_vpc = true."
 }
 
 variable "task_cpu" {

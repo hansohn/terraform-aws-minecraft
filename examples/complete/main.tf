@@ -40,6 +40,12 @@ module "minecraft" {
   # Restrict who can connect (default is open to the internet).
   # allowed_cidrs = ["203.0.113.4/32"]
 
+  # Deploy into an existing VPC instead of creating one. Subnets must be
+  # PUBLIC (route to an IGW) and in distinct AZs. Default creates a VPC.
+  # create_vpc = false
+  # vpc_id     = "vpc-0123456789abcdef0"
+  # subnet_ids = ["subnet-aaa", "subnet-bbb"]
+
   # Point-in-time EFS backups (opt-in); enable and optionally tune retention.
   enable_backups        = true
   backup_retention_days = 14
