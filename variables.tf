@@ -49,10 +49,21 @@ variable "cpu_architecture" {
   description = "Task CPU architecture. Fargate Spot only supports X86_64; use ARM64 only with use_spot = false."
 }
 
+variable "server_edition" {
+  type        = string
+  default     = "java"
+  description = "Minecraft edition to run. \"java\" listens on TCP (minecraft_port); \"bedrock\" runs a native Bedrock server on UDP 19132. Drives the game port protocol and the default container image."
+
+  validation {
+    condition     = contains(["java", "bedrock"], var.server_edition)
+    error_message = "server_edition must be \"java\" or \"bedrock\"."
+  }
+}
+
 variable "minecraft_image" {
   type        = string
-  default     = "itzg/minecraft-server:latest"
-  description = "Minecraft server container image."
+  default     = ""
+  description = "Minecraft server container image. Empty selects the edition default: itzg/minecraft-server for java, itzg/minecraft-bedrock-server for bedrock."
 }
 
 variable "watchdog_image" {
@@ -64,19 +75,19 @@ variable "watchdog_image" {
 variable "minecraft_port" {
   type        = number
   default     = 25565
-  description = "TCP port the Java server listens on."
+  description = "TCP port the Java server listens on. Ignored when server_edition = \"bedrock\" (native Bedrock uses UDP 19132)."
 }
 
 variable "bedrock_port" {
   type        = number
   default     = 19132
-  description = "UDP port for Bedrock clients via Geyser. Set enable_bedrock = true to open it."
+  description = "UDP port opened for Bedrock clients via the Geyser plugin. Only used on a java server with enable_geyser = true."
 }
 
-variable "enable_bedrock" {
+variable "enable_geyser" {
   type        = bool
   default     = false
-  description = "Open the Bedrock UDP port (bedrock_port) for Geyser. Enable when running the Geyser plugin so Bedrock clients can connect."
+  description = "On a java server, also open the Bedrock UDP port (bedrock_port) for the Geyser plugin so Bedrock clients can join. For a native Bedrock server use server_edition = \"bedrock\" instead."
 }
 
 variable "minecraft_env" {
@@ -101,6 +112,37 @@ variable "efs_throughput_mode" {
   type        = string
   default     = "bursting"
   description = "EFS throughput mode. Use \"bursting\" or \"elastic\"; avoid \"provisioned\" to keep costs down."
+}
+
+variable "discord_webhook_url" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF_VAR_discord_webhook_url; keep it out of version control."
+}
+
+variable "allowed_cidrs" {
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+  description = "CIDR blocks allowed to reach the game port(s). Defaults to open (0.0.0.0/0); narrow to known player IPs to lock the server down. Note the port must stay reachable from wherever players connect for the wake-on-DNS launcher to trigger."
+}
+
+variable "enable_backups" {
+  type        = bool
+  default     = false
+  description = "Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained)."
+}
+
+variable "backup_schedule" {
+  type        = string
+  default     = "cron(0 5 * * ? *)"
+  description = "Cron schedule (UTC) for EFS backups when enable_backups is true. Defaults to daily at 05:00 UTC."
+}
+
+variable "backup_retention_days" {
+  type        = number
+  default     = 35
+  description = "Days to retain each EFS backup recovery point when enable_backups is true."
 }
 
 variable "log_retention_days" {

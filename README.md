@@ -19,8 +19,9 @@
 
 ## :open_book: Usage
 
-This module runs a Minecraft (Java) server on **ECS Fargate that scales to
-zero** — you only pay for compute while someone is actually playing. When a
+This module runs a Minecraft server (Java or Bedrock) on **ECS Fargate that
+scales to zero** — you only pay for compute while someone is actually playing.
+When a
 player resolves the server's hostname, a Route53 DNS-query log triggers a Lambda
 that starts the task; a watchdog sidecar points DNS at the task on boot and
 shuts the server back down after a configurable idle period. World data persists
@@ -57,6 +58,36 @@ After `apply`, delegate the subdomain to Route53 by adding the `name_servers`
 output as `NS` records at your parent domain's DNS provider (e.g. Cloudflare),
 **DNS-only / unproxied**. Players then connect to `domain_name`.
 
+### Optional features
+
+```hcl
+module "minecraft" {
+  source      = "hansohn/minecraft/aws"
+  domain_name = "minecraft.example.com"
+
+  # Let Bedrock clients join a Java server via the Geyser plugin (opens UDP 19132).
+  enable_geyser = true
+  minecraft_env = { TYPE = "PAPER", MODRINTH_PROJECTS = "geyser,floodgate" }
+
+  # ...or run a native Bedrock server instead of Java (UDP 19132):
+  # server_edition = "bedrock"
+
+  # Restrict who can connect (default is open to the internet).
+  allowed_cidrs = ["203.0.113.4/32"]
+
+  # Point-in-time EFS backups (opt-in); enable and optionally tune retention.
+  enable_backups        = true
+  backup_retention_days = 14
+
+  # Repost start/stop notifications to Discord (pass the URL as a secret).
+  # discord_webhook_url = var.discord_webhook_url
+}
+```
+
+> **Upgrading to v0.4.0:** `enable_bedrock` was renamed to **`enable_geyser`**
+> to distinguish the Java-side Geyser add-on from running a native Bedrock
+> server (`server_edition = "bedrock"`). Rename the input when you upgrade.
+
 ## :sparkles: Examples
 
 Please see the sample set of examples below for a better understanding of implementation
@@ -68,18 +99,24 @@ Please see the sample set of examples below for a better understanding of implem
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_bedrock_port"></a> [bedrock\_port](#input\_bedrock\_port) | UDP port for Bedrock clients via Geyser. Set enable\_bedrock = true to open it. | `number` | `19132` | no |
+| <a name="input_allowed_cidrs"></a> [allowed\_cidrs](#input\_allowed\_cidrs) | CIDR blocks allowed to reach the game port(s). Defaults to open (0.0.0.0/0); narrow to known player IPs to lock the server down. Note the port must stay reachable from wherever players connect for the wake-on-DNS launcher to trigger. | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
+| <a name="input_backup_retention_days"></a> [backup\_retention\_days](#input\_backup\_retention\_days) | Days to retain each EFS backup recovery point when enable\_backups is true. | `number` | `35` | no |
+| <a name="input_backup_schedule"></a> [backup\_schedule](#input\_backup\_schedule) | Cron schedule (UTC) for EFS backups when enable\_backups is true. Defaults to daily at 05:00 UTC. | `string` | `"cron(0 5 * * ? *)"` | no |
+| <a name="input_bedrock_port"></a> [bedrock\_port](#input\_bedrock\_port) | UDP port opened for Bedrock clients via the Geyser plugin. Only used on a java server with enable\_geyser = true. | `number` | `19132` | no |
 | <a name="input_cpu_architecture"></a> [cpu\_architecture](#input\_cpu\_architecture) | Task CPU architecture. Fargate Spot only supports X86\_64; use ARM64 only with use\_spot = false. | `string` | `"X86_64"` | no |
+| <a name="input_discord_webhook_url"></a> [discord\_webhook\_url](#input\_discord\_webhook\_url) | Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF\_VAR\_discord\_webhook\_url; keep it out of version control. | `string` | `""` | no |
 | <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. "minecraft.hansohn.io"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name\_servers output. | `string` | n/a | yes |
 | <a name="input_efs_throughput_mode"></a> [efs\_throughput\_mode](#input\_efs\_throughput\_mode) | EFS throughput mode. Use "bursting" or "elastic"; avoid "provisioned" to keep costs down. | `string` | `"bursting"` | no |
-| <a name="input_enable_bedrock"></a> [enable\_bedrock](#input\_enable\_bedrock) | Open the Bedrock UDP port (bedrock\_port) for Geyser. Enable when running the Geyser plugin so Bedrock clients can connect. | `bool` | `false` | no |
+| <a name="input_enable_backups"></a> [enable\_backups](#input\_enable\_backups) | Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained). | `bool` | `false` | no |
+| <a name="input_enable_geyser"></a> [enable\_geyser](#input\_enable\_geyser) | On a java server, also open the Bedrock UDP port (bedrock\_port) for the Geyser plugin so Bedrock clients can join. For a native Bedrock server use server\_edition = "bedrock" instead. | `bool` | `false` | no |
 | <a name="input_java_memory"></a> [java\_memory](#input\_java\_memory) | Heap size passed to itzg/minecraft-server via MEMORY. Keep it below task\_memory to leave headroom for JVM metaspace/native memory and the watchdog sidecar. | `string` | `"10G"` | no |
 | <a name="input_log_retention_days"></a> [log\_retention\_days](#input\_log\_retention\_days) | CloudWatch Logs retention for container, DNS query, and Lambda logs. | `number` | `7` | no |
 | <a name="input_minecraft_env"></a> [minecraft\_env](#input\_minecraft\_env) | Extra environment variables for itzg/minecraft-server (e.g. TYPE, VERSION, MODPACK, AUTO\_CURSEFORGE settings, CF\_API\_KEY). Merged over the EULA/MEMORY defaults. | `map(string)` | `{}` | no |
-| <a name="input_minecraft_image"></a> [minecraft\_image](#input\_minecraft\_image) | Minecraft server container image. | `string` | `"itzg/minecraft-server:latest"` | no |
-| <a name="input_minecraft_port"></a> [minecraft\_port](#input\_minecraft\_port) | TCP port the Java server listens on. | `number` | `25565` | no |
+| <a name="input_minecraft_image"></a> [minecraft\_image](#input\_minecraft\_image) | Minecraft server container image. Empty selects the edition default: itzg/minecraft-server for java, itzg/minecraft-bedrock-server for bedrock. | `string` | `""` | no |
+| <a name="input_minecraft_port"></a> [minecraft\_port](#input\_minecraft\_port) | TCP port the Java server listens on. Ignored when server\_edition = "bedrock" (native Bedrock uses UDP 19132). | `number` | `25565` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name prefix applied to all resources. | `string` | `"minecraft"` | no |
 | <a name="input_notification_email"></a> [notification\_email](#input\_notification\_email) | If set, subscribes this email address to the SNS topic for start/stop notifications. | `string` | `""` | no |
+| <a name="input_server_edition"></a> [server\_edition](#input\_server\_edition) | Minecraft edition to run. "java" listens on TCP (minecraft\_port); "bedrock" runs a native Bedrock server on UDP 19132. Drives the game port protocol and the default container image. | `string` | `"java"` | no |
 | <a name="input_shutdown_minutes"></a> [shutdown\_minutes](#input\_shutdown\_minutes) | Idle time (minutes) with no players before the watchdog scales the service to zero. | `number` | `20` | no |
 | <a name="input_startup_minutes"></a> [startup\_minutes](#input\_startup\_minutes) | Grace period (minutes) the watchdog waits for a first connection before it may shut the server down. | `number` | `10` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Additional tags applied to all resources. | `map(string)` | `{}` | no |

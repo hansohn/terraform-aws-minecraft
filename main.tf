@@ -18,6 +18,16 @@ locals {
   # Two AZs for EFS mount-target redundancy; the task itself runs in one.
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
 
+  # Server edition drives the primary game port protocol and the default image.
+  # Java listens on TCP 25565; native Bedrock listens on UDP 19132.
+  is_bedrock    = var.server_edition == "bedrock"
+  game_protocol = local.is_bedrock ? "udp" : "tcp"
+  game_port     = local.is_bedrock ? 19132 : var.minecraft_port
+
+  container_image = var.minecraft_image != "" ? var.minecraft_image : (
+    local.is_bedrock ? "itzg/minecraft-bedrock-server:latest" : "itzg/minecraft-server:latest"
+  )
+
   # itzg/minecraft-server environment. EULA + heap size are always set; anything
   # in var.minecraft_env overrides/extends them (e.g. TYPE, VERSION, CF_API_KEY).
   minecraft_environment = merge(
