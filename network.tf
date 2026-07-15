@@ -56,19 +56,21 @@ resource "aws_security_group" "server" {
   }
 }
 
-# One rule per allowed CIDR (default 0.0.0.0/0 = open to the internet).
+# Primary game port. One rule per allowed CIDR (default 0.0.0.0/0 = open).
+# Protocol/port follow the edition: TCP 25565 for java, UDP 19132 for bedrock.
 resource "aws_vpc_security_group_ingress_rule" "server_game" {
   for_each          = toset(var.allowed_cidrs)
   security_group_id = aws_security_group.server.id
-  description       = "Minecraft Java"
-  from_port         = var.minecraft_port
-  to_port           = var.minecraft_port
-  ip_protocol       = "tcp"
+  description       = "Minecraft ${var.server_edition}"
+  from_port         = local.game_port
+  to_port           = local.game_port
+  ip_protocol       = local.game_protocol
   cidr_ipv4         = each.value
 }
 
+# Extra UDP port for Bedrock clients via the Geyser plugin (java servers only).
 resource "aws_vpc_security_group_ingress_rule" "server_bedrock" {
-  for_each          = var.enable_bedrock ? toset(var.allowed_cidrs) : toset([])
+  for_each          = var.enable_geyser ? toset(var.allowed_cidrs) : toset([])
   security_group_id = aws_security_group.server.id
   description       = "Geyser / Bedrock"
   from_port         = var.bedrock_port

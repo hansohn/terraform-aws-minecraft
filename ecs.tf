@@ -58,17 +58,17 @@ resource "aws_ecs_task_definition" "this" {
   container_definitions = jsonencode([
     {
       name        = "minecraft"
-      image       = var.minecraft_image
+      image       = local.container_image
       essential   = true
       environment = [for k, v in local.minecraft_environment : { name = k, value = v }]
 
       portMappings = concat(
         [{
-          containerPort = var.minecraft_port
-          hostPort      = var.minecraft_port
-          protocol      = "tcp"
+          containerPort = local.game_port
+          hostPort      = local.game_port
+          protocol      = local.game_protocol
         }],
-        var.enable_bedrock ? [{
+        var.enable_geyser ? [{
           containerPort = var.bedrock_port
           hostPort      = var.bedrock_port
           protocol      = "udp"
