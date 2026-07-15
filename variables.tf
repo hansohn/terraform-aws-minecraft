@@ -129,8 +129,8 @@ variable "allowed_cidrs" {
 
 variable "enable_backups" {
   type        = bool
-  default     = true
-  description = "Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; this guards against corruption, griefing, or accidental deletion."
+  default     = false
+  description = "Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained)."
 }
 
 variable "backup_schedule" {
