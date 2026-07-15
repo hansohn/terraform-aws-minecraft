@@ -68,7 +68,7 @@ resource "aws_ecs_task_definition" "this" {
           hostPort      = local.game_port
           protocol      = local.game_protocol
         }],
-        var.enable_geyser ? [{
+        var.enable_geyser && !local.is_bedrock ? [{
           containerPort = var.bedrock_port
           hostPort      = var.bedrock_port
           protocol      = "udp"

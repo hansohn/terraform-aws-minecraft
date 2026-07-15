@@ -70,7 +70,7 @@ resource "aws_vpc_security_group_ingress_rule" "server_game" {
 
 # Extra UDP port for Bedrock clients via the Geyser plugin (java servers only).
 resource "aws_vpc_security_group_ingress_rule" "server_bedrock" {
-  for_each          = var.enable_geyser ? toset(var.allowed_cidrs) : toset([])
+  for_each          = var.enable_geyser && !local.is_bedrock ? toset(var.allowed_cidrs) : toset([])
   security_group_id = aws_security_group.server.id
   description       = "Geyser / Bedrock"
   from_port         = var.bedrock_port
