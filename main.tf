@@ -53,6 +53,15 @@ locals {
     }
   }
 
+  # Seed plugin_configs onto the EFS volume via a one-shot init container. Each
+  # file's content is base64-encoded (safe to inline — no quoting hazards) and
+  # written only if absent, so edits by the server/plugins survive restarts.
+  seed_configs = length(var.plugin_configs) > 0
+  seed_script = join("\n", concat(["set -eu"], [
+    for path, content in var.plugin_configs :
+    "mkdir -p \"$(dirname '/data/${path}')\"; [ -e '/data/${path}' ] || echo '${base64encode(content)}' | base64 -d > '/data/${path}'"
+  ]))
+
   tags = merge(
     {
       Name      = local.name

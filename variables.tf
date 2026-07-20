@@ -165,6 +165,23 @@ variable "additional_ports" {
   }
 }
 
+variable "plugin_configs" {
+  type        = map(string)
+  default     = {}
+  description = "Files to seed onto the EFS /data volume before the server starts, keyed by path relative to /data (e.g. \"plugins/DiscordSRV/config.yml\"); values are the file contents. A lightweight init container writes each file only if it does not already exist, so the server/plugins can edit it afterward (delete the file on EFS to re-seed). Contents are stored in the task definition in plaintext — do NOT put secrets (bot tokens, passwords) here; reference those from the plugin config via its own secret mechanism."
+
+  validation {
+    condition     = alltrue([for path in keys(var.plugin_configs) : !can(regex("(^/|\\.\\.|')", path))])
+    error_message = "plugin_configs keys must be relative paths under /data without \"..\" segments or single quotes."
+  }
+}
+
+variable "config_seed_image" {
+  type        = string
+  default     = "public.ecr.aws/docker/library/busybox:stable"
+  description = "Container image for the init container that seeds plugin_configs onto the EFS volume. Only used when plugin_configs is non-empty; needs a shell and base64 (busybox suffices)."
+}
+
 variable "enable_backups" {
   type        = bool
   default     = false
