@@ -42,6 +42,17 @@ locals {
     var.minecraft_env,
   )
 
+  # Cartesian product of additional_ports x allowed_cidrs, keyed stably so the
+  # security-group for_each stays deterministic across plans.
+  additional_port_rules = {
+    for pair in setproduct(var.additional_ports, var.allowed_cidrs) :
+    "${pair[0].protocol}-${pair[0].port}-${pair[1]}" => {
+      port     = pair[0].port
+      protocol = pair[0].protocol
+      cidr     = pair[1]
+    }
+  }
+
   tags = merge(
     {
       Name      = local.name

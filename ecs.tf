@@ -73,6 +73,11 @@ resource "aws_ecs_task_definition" "this" {
           hostPort      = var.bedrock_port
           protocol      = "udp"
         }] : [],
+        [for p in var.additional_ports : {
+          containerPort = p.port
+          hostPort      = p.port
+          protocol      = p.protocol
+        }],
       )
 
       mountPoints = [{

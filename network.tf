@@ -84,6 +84,17 @@ resource "aws_vpc_security_group_ingress_rule" "server_bedrock" {
   cidr_ipv4         = each.value
 }
 
+# Extra plugin ports (var.additional_ports), one rule per port x allowed CIDR.
+resource "aws_vpc_security_group_ingress_rule" "server_additional" {
+  for_each          = local.additional_port_rules
+  security_group_id = aws_security_group.server.id
+  description       = "Additional ${each.value.protocol} ${each.value.port}"
+  from_port         = each.value.port
+  to_port           = each.value.port
+  ip_protocol       = each.value.protocol
+  cidr_ipv4         = each.value.cidr
+}
+
 resource "aws_vpc_security_group_egress_rule" "server_all" {
   security_group_id = aws_security_group.server.id
   description       = "Allow all outbound"

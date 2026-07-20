@@ -75,6 +75,11 @@ module "minecraft" {
   # Restrict who can connect (default is open to the internet).
   allowed_cidrs = ["203.0.113.4/32"]
 
+  # Open extra ports for plugins that need their own listener — e.g. Simple
+  # Voice Chat (install via MODRINTH_PROJECTS). Opened to the same allowed_cidrs
+  # as the game port.
+  additional_ports = [{ port = 24454, protocol = "udp" }]
+
   # Point-in-time EFS backups (opt-in); enable and optionally tune retention.
   enable_backups        = true
   backup_retention_days = 14
@@ -120,6 +125,7 @@ Please see the sample set of examples below for a better understanding of implem
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_additional_ports"></a> [additional\_ports](#input\_additional\_ports) | Extra ports to open on the task security group and map into the container, for plugins that need their own listener (e.g. Simple Voice Chat on UDP 24454, dynmap on TCP 8123). Each entry opens one ingress rule per allowed\_cidrs block. protocol must be "tcp" or "udp". | <pre>list(object({<br/>    port     = number<br/>    protocol = string<br/>  }))</pre> | `[]` | no |
 | <a name="input_allowed_cidrs"></a> [allowed\_cidrs](#input\_allowed\_cidrs) | CIDR blocks allowed to reach the game port(s). Defaults to open (0.0.0.0/0); narrow to known player IPs to lock the server down. Note the port must stay reachable from wherever players connect for the wake-on-DNS launcher to trigger. | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
 | <a name="input_backup_retention_days"></a> [backup\_retention\_days](#input\_backup\_retention\_days) | Days to retain each EFS backup recovery point when enable\_backups is true. | `number` | `35` | no |
 | <a name="input_backup_schedule"></a> [backup\_schedule](#input\_backup\_schedule) | Cron schedule (UTC) for EFS backups when enable\_backups is true. Defaults to daily at 05:00 UTC. | `string` | `"cron(0 5 * * ? *)"` | no |

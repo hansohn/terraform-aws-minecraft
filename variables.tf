@@ -151,6 +151,20 @@ variable "enable_ecs_exec" {
   description = "Enable ECS Exec on the task so operators can open a shell (or run rcon-cli) inside the running container via `aws ecs execute-command`. Access is gated entirely by IAM over SSM Session Manager — no inbound port is opened. Grants the task role ssmmessages permissions."
 }
 
+variable "additional_ports" {
+  type = list(object({
+    port     = number
+    protocol = string
+  }))
+  default     = []
+  description = "Extra ports to open on the task security group and map into the container, for plugins that need their own listener (e.g. Simple Voice Chat on UDP 24454, dynmap on TCP 8123). Each entry opens one ingress rule per allowed_cidrs block. protocol must be \"tcp\" or \"udp\"."
+
+  validation {
+    condition     = alltrue([for p in var.additional_ports : contains(["tcp", "udp"], p.protocol)])
+    error_message = "Each additional_ports protocol must be \"tcp\" or \"udp\"."
+  }
+}
+
 variable "enable_backups" {
   type        = bool
   default     = false
