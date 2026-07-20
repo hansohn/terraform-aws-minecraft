@@ -118,12 +118,13 @@ resource "aws_ecs_task_definition" "this" {
 }
 
 resource "aws_ecs_service" "this" {
-  name            = local.name
-  cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.this.arn
-  desired_count   = 0
-  propagate_tags  = "SERVICE"
-  tags            = local.tags
+  name                   = local.name
+  cluster                = aws_ecs_cluster.this.id
+  task_definition        = aws_ecs_task_definition.this.arn
+  desired_count          = 0
+  propagate_tags         = "SERVICE"
+  enable_execute_command = var.enable_ecs_exec
+  tags                   = local.tags
 
   capacity_provider_strategy {
     capacity_provider = var.use_spot ? "FARGATE_SPOT" : "FARGATE"

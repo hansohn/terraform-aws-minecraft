@@ -145,6 +145,12 @@ variable "allowed_cidrs" {
   description = "CIDR blocks allowed to reach the game port(s). Defaults to open (0.0.0.0/0); narrow to known player IPs to lock the server down. Note the port must stay reachable from wherever players connect for the wake-on-DNS launcher to trigger."
 }
 
+variable "enable_ecs_exec" {
+  type        = bool
+  default     = false
+  description = "Enable ECS Exec on the task so operators can open a shell (or run rcon-cli) inside the running container via `aws ecs execute-command`. Access is gated entirely by IAM over SSM Session Manager — no inbound port is opened. Grants the task role ssmmessages permissions."
+}
+
 variable "enable_backups" {
   type        = bool
   default     = false
