@@ -79,6 +79,9 @@ module "minecraft" {
   enable_backups        = true
   backup_retention_days = 14
 
+  # Admin the running container via ECS Exec (IAM-gated, no inbound port).
+  enable_ecs_exec = true
+
   # Repost start/stop notifications to Discord (pass the URL as a secret).
   # discord_webhook_url = var.discord_webhook_url
 
@@ -93,6 +96,18 @@ module "minecraft" {
 > **Upgrading to v0.4.0:** `enable_bedrock` was renamed to **`enable_geyser`**
 > to distinguish the Java-side Geyser add-on from running a native Bedrock
 > server (`server_edition = "bedrock"`). Rename the input when you upgrade.
+
+With `enable_ecs_exec = true`, open a shell — or drive the container's built-in
+RCON — on the running task without any inbound port (access is IAM-gated over
+SSM Session Manager):
+
+```sh
+TASK=$(aws ecs list-tasks --cluster minecraft --query 'taskArns[0]' --output text)
+aws ecs execute-command --cluster minecraft --task "$TASK" \
+  --container minecraft --interactive --command "rcon-cli"
+```
+
+The AWS CLI needs the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) installed locally.
 
 ## :sparkles: Examples
 
@@ -115,6 +130,7 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. "minecraft.hansohn.io"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name\_servers output. | `string` | n/a | yes |
 | <a name="input_efs_throughput_mode"></a> [efs\_throughput\_mode](#input\_efs\_throughput\_mode) | EFS throughput mode. Use "bursting" or "elastic"; avoid "provisioned" to keep costs down. | `string` | `"bursting"` | no |
 | <a name="input_enable_backups"></a> [enable\_backups](#input\_enable\_backups) | Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained). | `bool` | `false` | no |
+| <a name="input_enable_ecs_exec"></a> [enable\_ecs\_exec](#input\_enable\_ecs\_exec) | Enable ECS Exec on the task so operators can open a shell (or run rcon-cli) inside the running container via `aws ecs execute-command`. Access is gated entirely by IAM over SSM Session Manager — no inbound port is opened. Grants the task role ssmmessages permissions. | `bool` | `false` | no |
 | <a name="input_enable_geyser"></a> [enable\_geyser](#input\_enable\_geyser) | On a java server, also open the Bedrock UDP port (bedrock\_port) for the Geyser plugin so Bedrock clients can join. For a native Bedrock server use server\_edition = "bedrock" instead. | `bool` | `false` | no |
 | <a name="input_java_memory"></a> [java\_memory](#input\_java\_memory) | Heap size passed to itzg/minecraft-server via MEMORY. Keep it below task\_memory to leave headroom for JVM metaspace/native memory and the watchdog sidecar. | `string` | `"10G"` | no |
 | <a name="input_log_retention_days"></a> [log\_retention\_days](#input\_log\_retention\_days) | CloudWatch Logs retention for container, DNS query, and Lambda logs. | `number` | `7` | no |

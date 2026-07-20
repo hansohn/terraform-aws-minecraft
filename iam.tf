@@ -64,6 +64,22 @@ data "aws_iam_policy_document" "task" {
     actions   = ["sns:Publish"]
     resources = [aws_sns_topic.this.arn]
   }
+
+  # ECS Exec: the SSM agent in the container opens Session Manager channels using
+  # the task role. Only granted when enable_ecs_exec = true. Not resource-scopable.
+  dynamic "statement" {
+    for_each = var.enable_ecs_exec ? [1] : []
+    content {
+      sid = "EcsExec"
+      actions = [
+        "ssmmessages:CreateControlChannel",
+        "ssmmessages:CreateDataChannel",
+        "ssmmessages:OpenControlChannel",
+        "ssmmessages:OpenDataChannel",
+      ]
+      resources = ["*"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "task" {
