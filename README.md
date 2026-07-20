@@ -87,6 +87,11 @@ module "minecraft" {
   # Admin the running container via ECS Exec (IAM-gated, no inbound port).
   enable_ecs_exec = true
 
+  # Seed plugin config files onto the EFS volume (written only if absent).
+  plugin_configs = {
+    "plugins/DiscordSRV/config.yml" = file("${path.module}/discordsrv.yml")
+  }
+
   # Repost start/stop notifications to Discord (pass the URL as a secret).
   # discord_webhook_url = var.discord_webhook_url
 
@@ -114,6 +119,17 @@ aws ecs execute-command --cluster minecraft --task "$TASK" \
 
 The AWS CLI needs the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) installed locally.
 
+`plugin_configs` seeds files onto the EFS `/data` volume so plugins (e.g. a
+Discord bridge like DiscordSRV) start with a config already in place. A one-shot
+init container writes each file **only if it does not already exist**, so edits
+made in-game or by the plugin survive restarts — to re-seed a file, delete it
+from EFS first. Keys are paths relative to `/data`.
+
+> :warning: File contents are stored in the ECS task definition in plaintext and
+> visible to anyone with `ecs:DescribeTaskDefinition`. **Do not put secrets**
+> (bot tokens, passwords) in `plugin_configs` — seed the non-secret config and
+> supply secrets through the plugin's own secret mechanism.
+
 ## :sparkles: Examples
 
 Please see the sample set of examples below for a better understanding of implementation
@@ -130,6 +146,7 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_backup_retention_days"></a> [backup\_retention\_days](#input\_backup\_retention\_days) | Days to retain each EFS backup recovery point when enable\_backups is true. | `number` | `35` | no |
 | <a name="input_backup_schedule"></a> [backup\_schedule](#input\_backup\_schedule) | Cron schedule (UTC) for EFS backups when enable\_backups is true. Defaults to daily at 05:00 UTC. | `string` | `"cron(0 5 * * ? *)"` | no |
 | <a name="input_bedrock_port"></a> [bedrock\_port](#input\_bedrock\_port) | UDP port opened for Bedrock clients via the Geyser plugin. Only used on a java server with enable\_geyser = true. | `number` | `19132` | no |
+| <a name="input_config_seed_image"></a> [config\_seed\_image](#input\_config\_seed\_image) | Container image for the init container that seeds plugin\_configs onto the EFS volume. Only used when plugin\_configs is non-empty; needs a shell and base64 (busybox suffices). | `string` | `"public.ecr.aws/docker/library/busybox:stable"` | no |
 | <a name="input_cpu_architecture"></a> [cpu\_architecture](#input\_cpu\_architecture) | Task CPU architecture. Fargate Spot only supports X86\_64; use ARM64 only with use\_spot = false. | `string` | `"X86_64"` | no |
 | <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create a dedicated VPC (with public subnets, IGW, and routing). Set false to deploy into an existing VPC via vpc\_id + subnet\_ids. | `bool` | `true` | no |
 | <a name="input_discord_webhook_url"></a> [discord\_webhook\_url](#input\_discord\_webhook\_url) | Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF\_VAR\_discord\_webhook\_url; keep it out of version control. | `string` | `""` | no |
@@ -145,6 +162,7 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_minecraft_port"></a> [minecraft\_port](#input\_minecraft\_port) | TCP port the Java server listens on. Ignored when server\_edition = "bedrock" (native Bedrock uses UDP 19132). | `number` | `25565` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name prefix applied to all resources. | `string` | `"minecraft"` | no |
 | <a name="input_notification_email"></a> [notification\_email](#input\_notification\_email) | If set, subscribes this email address to the SNS topic for start/stop notifications. | `string` | `""` | no |
+| <a name="input_plugin_configs"></a> [plugin\_configs](#input\_plugin\_configs) | Files to seed onto the EFS /data volume before the server starts, keyed by path relative to /data (e.g. "plugins/DiscordSRV/config.yml"); values are the file contents. A lightweight init container writes each file only if it does not already exist, so the server/plugins can edit it afterward (delete the file on EFS to re-seed). Contents are stored in the task definition in plaintext — do NOT put secrets (bot tokens, passwords) here; reference those from the plugin config via its own secret mechanism. | `map(string)` | `{}` | no |
 | <a name="input_server_edition"></a> [server\_edition](#input\_server\_edition) | Minecraft edition to run. "java" listens on TCP (minecraft\_port); "bedrock" runs a native Bedrock server on UDP 19132. Drives the game port protocol and the default container image. | `string` | `"java"` | no |
 | <a name="input_shutdown_minutes"></a> [shutdown\_minutes](#input\_shutdown\_minutes) | Idle time (minutes) with no players before the watchdog scales the service to zero. | `number` | `20` | no |
 | <a name="input_startup_minutes"></a> [startup\_minutes](#input\_startup\_minutes) | Grace period (minutes) the watchdog waits for a first connection before it may shut the server down. | `number` | `10` | no |

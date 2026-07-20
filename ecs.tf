@@ -55,8 +55,8 @@ resource "aws_ecs_task_definition" "this" {
     }
   }
 
-  container_definitions = jsonencode([
-    {
+  container_definitions = jsonencode(concat([
+    merge({
       name        = "minecraft"
       image       = local.container_image
       essential   = true
@@ -94,7 +94,10 @@ resource "aws_ecs_task_definition" "this" {
           "awslogs-stream-prefix" = "minecraft"
         }
       }
-    },
+      },
+      # Wait for the config-seed init container to finish before booting.
+      local.seed_configs ? { dependsOn = [{ containerName = "config-seed", condition = "SUCCESS" }] } : {},
+    ),
     {
       name      = "watchdog"
       image     = var.watchdog_image
@@ -119,7 +122,31 @@ resource "aws_ecs_task_definition" "this" {
         }
       }
     },
-  ])
+    ], local.seed_configs ? [
+    # One-shot init container: seeds plugin_configs onto the shared EFS volume,
+    # then exits. Not essential, so its exit does not stop the task.
+    {
+      name      = "config-seed"
+      image     = var.config_seed_image
+      essential = false
+      command   = ["sh", "-c", local.seed_script]
+
+      mountPoints = [{
+        sourceVolume  = "data"
+        containerPath = "/data"
+        readOnly      = false
+      }]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.server.name
+          "awslogs-region"        = local.region
+          "awslogs-stream-prefix" = "config-seed"
+        }
+      }
+    }
+  ] : []))
 }
 
 resource "aws_ecs_service" "this" {
