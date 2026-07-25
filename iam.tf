@@ -43,9 +43,15 @@ data "aws_iam_policy_document" "task" {
     resources = ["*"]
   }
 
+  # The watchdog discovers its own public IP to write the DNS record: it calls
+  # ecs:DescribeTasks to find its task's ENI, then ec2:DescribeNetworkInterfaces
+  # to read that ENI's public IP. Neither is resource-scopable here (the task
+  # ARN isn't known until the task runs). Without ecs:DescribeTasks the lookup
+  # fails and the watchdog writes a broken record, leaving DNS pointed at a
+  # stale/dead IP.
   statement {
-    sid       = "DescribeEni"
-    actions   = ["ec2:DescribeNetworkInterfaces"]
+    sid       = "DiscoverSelfIp"
+    actions   = ["ecs:DescribeTasks", "ec2:DescribeNetworkInterfaces"]
     resources = ["*"]
   }
 
