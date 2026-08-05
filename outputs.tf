@@ -37,6 +37,11 @@ output "sns_topic_arn" {
   value       = aws_sns_topic.this.arn
 }
 
+output "discord_interactions_url" {
+  description = "Lambda Function URL to paste into the Discord Developer Portal as the app's Interactions Endpoint URL. Empty unless discord_application_public_key is set."
+  value       = try(aws_lambda_function_url.discord_command[0].function_url, "")
+}
+
 output "vpc_id" {
   description = "VPC ID hosting the server (created or caller-supplied)."
   value       = local.vpc_id

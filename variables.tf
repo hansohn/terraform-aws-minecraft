@@ -139,6 +139,18 @@ variable "discord_webhook_url" {
   description = "Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF_VAR_discord_webhook_url; keep it out of version control."
 }
 
+variable "discord_application_public_key" {
+  type        = string
+  default     = ""
+  description = "Discord application public key (Developer Portal > General Information). When set, a Lambda Function URL is published as the app's interactions endpoint, backing a /minecraft slash command that starts the server and reports status. Not a secret — it only verifies Discord's request signatures."
+}
+
+variable "discord_guild_id" {
+  type        = string
+  default     = ""
+  description = "Restrict the /minecraft slash command to a single Discord server (guild) ID. Empty allows any guild the app is installed in. Ignored unless discord_application_public_key is set."
+}
+
 variable "allowed_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
