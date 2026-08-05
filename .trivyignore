@@ -20,12 +20,22 @@ AVD-AWS-0178
 
 # AWS-0017: CloudWatch log groups use default AWS-managed encryption at rest. A
 # customer-managed KMS key adds cost and key management not warranted for game,
-# DNS-query, and launcher logs.
+# DNS-query, and Lambda logs (launcher, dns-reset, Discord notifier, Discord
+# command).
 AVD-AWS-0017
 
 # AWS-0034: Container Insights left disabled to avoid extra CloudWatch cost on a
 # personal server.
 AVD-AWS-0034
 
-# AWS-0066: X-Ray tracing omitted on the tiny start/stop launcher Lambda.
+# AWS-0066: X-Ray tracing omitted on the small single-purpose Lambdas (launcher,
+# dns-reset, Discord notifier, Discord command); each is a handful of API calls.
 AVD-AWS-0066
+
+# AWS-0125 / AWS-0138: The Discord command Lambda's Function URL is intentionally
+# public with authorization_type NONE — Discord posts interactions from its own
+# infrastructure and cannot sign with SigV4. Access control is the mandatory
+# Ed25519 signature check in lambda/discord_command.py, which also rejects stale
+# timestamps; discord_guild_id optionally pins the command to one server.
+AVD-AWS-0125
+AVD-AWS-0138

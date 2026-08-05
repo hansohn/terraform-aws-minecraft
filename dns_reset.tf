@@ -69,7 +69,7 @@ resource "aws_lambda_function" "dns_reset" {
       CLUSTER        = aws_ecs_cluster.this.name
       SERVICE        = aws_ecs_service.this.name
       ZONE_ID        = aws_route53_zone.this.zone_id
-      RECORD_NAME    = var.domain_name
+      DOMAIN_NAME    = var.domain_name
       PLACEHOLDER_IP = local.dns_placeholder_ip
       RECORD_TTL     = tostring(local.dns_record_ttl)
     }

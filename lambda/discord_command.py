@@ -121,7 +121,7 @@ PUBLIC_KEY = bytes.fromhex(os.environ["DISCORD_PUBLIC_KEY"])
 CLUSTER = os.environ["CLUSTER"]
 SERVICE = os.environ["SERVICE"]
 DOMAIN_NAME = os.environ["DOMAIN_NAME"]
-GUILD_ID = os.environ["GUILD_ID"]
+GUILD_ID = os.environ["DISCORD_GUILD_ID"]
 
 # Discord signs the timestamp alongside the body, so rejecting stale timestamps
 # closes the replay window a valid captured signature would otherwise leave open.

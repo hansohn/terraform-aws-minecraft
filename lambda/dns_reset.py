@@ -17,7 +17,7 @@ route53 = boto3.client("route53")
 CLUSTER = os.environ["CLUSTER"]
 SERVICE = os.environ["SERVICE"]
 ZONE_ID = os.environ["ZONE_ID"]
-RECORD_NAME = os.environ["RECORD_NAME"]
+DOMAIN_NAME = os.environ["DOMAIN_NAME"]
 PLACEHOLDER_IP = os.environ["PLACEHOLDER_IP"]
 RECORD_TTL = int(os.environ["RECORD_TTL"])
 
@@ -42,7 +42,7 @@ def handler(event, context):
                 {
                     "Action": "UPSERT",
                     "ResourceRecordSet": {
-                        "Name": RECORD_NAME,
+                        "Name": DOMAIN_NAME,
                         "Type": "A",
                         "TTL": RECORD_TTL,
                         "ResourceRecords": [{"Value": PLACEHOLDER_IP}],
@@ -51,5 +51,5 @@ def handler(event, context):
             ],
         },
     )
-    print(f"Reset {RECORD_NAME} to {PLACEHOLDER_IP}")
+    print(f"Reset {DOMAIN_NAME} to {PLACEHOLDER_IP}")
     return {"reset": True}
