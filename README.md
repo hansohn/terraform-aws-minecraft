@@ -60,6 +60,25 @@ After `apply`, delegate the subdomain to Route53 by adding the `name_servers`
 output as `NS` records at your parent domain's DNS provider (e.g. Cloudflare),
 **DNS-only / unproxied**. Players then connect to `domain_name`.
 
+If the parent domain is on Cloudflare, that delegation can be applied rather
+than clicked — one `NS` record per Route53 name server:
+
+```hcl
+resource "cloudflare_dns_record" "minecraft_ns" {
+  for_each = toset(module.minecraft.name_servers)
+
+  zone_id = var.cloudflare_zone_id # parent domain's zone ID, not a secret
+  name    = module.minecraft.server_address
+  type    = "NS"
+  content = each.value
+  ttl     = 3600
+}
+```
+
+The resource is `cloudflare_dns_record` on provider v5 (it was `cloudflare_record`
+before). Verify with `dig NS minecraft.example.com +short`, which should return
+the four Route53 name servers.
+
 ### Optional features
 
 ```hcl
@@ -68,8 +87,9 @@ module "minecraft" {
   domain_name = "minecraft.example.com"
 
   # Let Bedrock clients join a Java server via the Geyser plugin (opens UDP 19132).
+  # Install Geyser/Floodgate from GeyserMC's download API, not Modrinth — see
+  # "Geyser on Paper" below.
   enable_geyser = true
-  minecraft_env = { TYPE = "PAPER", MODRINTH_PROJECTS = "geyser,floodgate" }
 
   # ...or run a native Bedrock server instead of Java (UDP 19132):
   # server_edition = "bedrock"
@@ -112,6 +132,71 @@ module "minecraft" {
 > **Upgrading to v0.4.0:** `enable_bedrock` was renamed to **`enable_geyser`**
 > to distinguish the Java-side Geyser add-on from running a native Bedrock
 > server (`server_edition = "bedrock"`). Rename the input when you upgrade.
+
+### Sizing
+
+`task_cpu` / `task_memory` are Fargate task sizes; `java_memory` is the JVM heap
+inside it. Keep the heap well under the task memory — the JVM needs metaspace
+and native memory on top, and the watchdog sidecar shares the task.
+
+| Server | `task_cpu` | `task_memory` | `java_memory` |
+|---|---|---|---|
+| Vanilla / Paper, few players | 2048 | 4096 | `3G` |
+| Paper + plugin stack (Geyser, ViaVersion, voice chat) | 2048 | 8192 | `6G` |
+| Modded (Forge/Fabric modpack) | 2048 | 16384 | `10G` |
+
+Measured on a real deployment: Paper with Geyser, Floodgate, ViaVersion,
+ViaBackwards, and Simple Voice Chat sat at **~82% memory on 4096/3G** — fine
+solo, thin for a group — so 8192/6G is the better starting point for that stack.
+CPU is rarely the constraint: 2048 idles around 6% and spikes only at boot. On
+Spot the extra memory costs well under $1/month at typical play time.
+
+### Geyser on Paper
+
+Geyser and Floodgate let Bedrock clients join a Java server. **Install them from
+GeyserMC's download API rather than Modrinth** — Floodgate publishes no
+paper/spigot builds on Modrinth at all (fabric/neoforge only), and GeyserMC lets
+Hangar's Paper version tags go stale, so the vendor API is the only source that
+reliably tracks the newest Minecraft:
+
+```hcl
+enable_geyser = true
+
+minecraft_env = {
+  TYPE = "PAPER"
+
+  PLUGINS = join(",", [
+    "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot",
+    "https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot",
+  ])
+
+  # ViaVersion + ViaBackwards let clients on older Minecraft versions join a
+  # server running the newest release without updating first. Geyser also asks
+  # for ViaVersion. These do publish Paper builds on Modrinth.
+  MODRINTH_PROJECTS = "simple-voice-chat,viaversion,viabackwards"
+}
+
+# Simple Voice Chat needs its own UDP listener.
+additional_ports = [{ port = 24454, protocol = "udp" }]
+```
+
+### Restricting who can join
+
+`allowed_cidrs` narrows network access, but it's blunt — players' home IPs
+change. The practical control is Minecraft's own whitelist, set through
+`minecraft_env`:
+
+```hcl
+minecraft_env = {
+  ENABLE_WHITELIST = "TRUE"
+  WHITELIST        = "player1,player2,player3"
+  ONLINE_MODE      = "TRUE" # verify accounts against Mojang/Microsoft auth
+}
+```
+
+Keep `ONLINE_MODE = "TRUE"` unless you have a specific reason not to — with it
+off, anyone can connect using any username, and the whitelist stops meaning
+anything.
 
 With `enable_ecs_exec = true`, open a shell — or drive the container's built-in
 RCON — on the running task without any inbound port (access is IAM-gated over
@@ -172,6 +257,19 @@ so the Ed25519 signature check in `lambda/discord_command.py` is what guards it.
 Requests without a valid signature over the timestamp and body get a 401, and
 timestamps older than five minutes are refused to close the replay window. Set
 `discord_guild_id` to additionally pin the command to one server.
+
+### Using with Terragrunt
+
+Pin an **exact** module version. Terragrunt's `tfr://` getter passes the
+constraint straight to the registry's download endpoint, which wants a concrete
+version — a range like `~> 0.7.0` resolves fine from a warm `.terragrunt-cache`
+locally but 404s on a clean CI runner:
+
+```hcl
+terraform {
+  source = "tfr:///hansohn/minecraft/aws?version=0.7.0"
+}
+```
 
 ## :sparkles: Examples
 
