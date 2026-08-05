@@ -24,8 +24,10 @@ scales to zero** — you only pay for compute while someone is actually playing.
 When a
 player resolves the server's hostname, a Route53 DNS-query log triggers a Lambda
 that starts the task; a watchdog sidecar points DNS at the task on boot and
-shuts the server back down after a configurable idle period. World data persists
-on EFS between sessions.
+shuts the server back down after a configurable idle period. When the task
+stops, a second Lambda parks the A record back on a placeholder so the hostname
+never resolves to a public IP AWS has recycled to another account. World data
+persists on EFS between sessions.
 
 Because Route53 public-zone query logging must live in `us-east-1`, the module
 manages a dedicated `us-east-1` provider internally for that plumbing while the

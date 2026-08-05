@@ -18,6 +18,10 @@ locals {
   # Two AZs for EFS mount-target redundancy; the task itself runs in one.
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
 
+  # Value the A record holds while the server is down (see lambda/dns_reset.py).
+  dns_placeholder_ip = "127.0.0.1"
+  dns_record_ttl     = 30
+
   # Effective VPC/subnets: created here, or caller-supplied when create_vpc = false.
   vpc_id     = var.create_vpc ? one(aws_vpc.this[*].id) : var.vpc_id
   subnet_ids = var.create_vpc ? aws_subnet.public[*].id : var.subnet_ids
