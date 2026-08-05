@@ -13,13 +13,14 @@ resource "aws_route53_zone" "this" {
 }
 
 # The watchdog rewrites this A record to the task's public IP each time the
-# server boots, so Terraform only seeds a placeholder and ignores later changes.
+# server boots and the dns-reset Lambda parks it again on shutdown, so Terraform
+# only seeds a placeholder and ignores later changes.
 resource "aws_route53_record" "this" {
   zone_id = aws_route53_zone.this.zone_id
   name    = var.domain_name
   type    = "A"
-  ttl     = 30
-  records = ["127.0.0.1"]
+  ttl     = local.dns_record_ttl
+  records = [local.dns_placeholder_ip]
 
   lifecycle {
     ignore_changes = [records]
