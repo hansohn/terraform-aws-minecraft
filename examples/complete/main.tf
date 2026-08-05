@@ -54,6 +54,13 @@ module "minecraft" {
   notification_email  = var.notification_email
   discord_webhook_url = var.discord_webhook_url
 
+  # Publish a /minecraft slash command so players can wake the server from
+  # Discord and see that it's starting. Register the command and paste the
+  # discord_interactions_url output into the Developer Portal — see the module
+  # README. Pairs with discord_webhook_url, which announces when it's ready.
+  discord_application_public_key = var.discord_application_public_key
+  discord_guild_id               = var.discord_guild_id
+
   tags = {
     Environment = "personal"
   }

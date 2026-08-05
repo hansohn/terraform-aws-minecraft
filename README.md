@@ -97,6 +97,10 @@ module "minecraft" {
   # Repost start/stop notifications to Discord (pass the URL as a secret).
   # discord_webhook_url = var.discord_webhook_url
 
+  # Add a /minecraft slash command that wakes the server (see below).
+  # discord_application_public_key = "abc123..."
+  # discord_guild_id               = "112233445566778899"
+
   # Deploy into an existing VPC instead of creating one. Subnets must be
   # PUBLIC (route to an IGW) and in distinct AZs.
   # create_vpc = false
@@ -132,6 +136,43 @@ from EFS first. Keys are paths relative to `/data`.
 > (bot tokens, passwords) in `plugin_configs` — seed the non-secret config and
 > supply secrets through the plugin's own secret mechanism.
 
+### Discord slash command
+
+Waking the server by DNS query is invisible to players — the hostname resolves
+to a placeholder until the task is up, so a first connection attempt just fails
+and there's no way to tell "starting" from "broken". Setting
+`discord_application_public_key` publishes a `/minecraft` command instead:
+
+* `/minecraft start` — wakes the server (idempotent) and confirms immediately.
+* `/minecraft status` — reports asleep / starting / up.
+
+Readiness still arrives through the existing `discord_webhook_url`
+notification, so set both to close the loop.
+
+Three one-time manual steps, since Terraform can't create the Discord app:
+
+1. Create an application at the [Discord Developer Portal](https://discord.com/developers/applications).
+   Copy **Public Key** into `discord_application_public_key` and apply.
+2. Register the command, using the application ID and a bot token from the same app:
+
+   ```sh
+   curl -X PUT -H "Authorization: Bot $BOT_TOKEN" -H "Content-Type: application/json" \
+     "https://discord.com/api/v10/applications/$APP_ID/commands" \
+     -d '[{"name":"minecraft","description":"Control the Minecraft server","options":[
+           {"type":1,"name":"start","description":"Wake the server"},
+           {"type":1,"name":"status","description":"Check whether the server is up"}]}]'
+   ```
+
+3. Paste the `discord_interactions_url` output into the portal as the
+   **Interactions Endpoint URL**. Discord probes it with a deliberately invalid
+   signature and only saves the URL if the endpoint rejects it.
+
+The Function URL is public and unauthenticated — Discord can't sign with SigV4 —
+so the Ed25519 signature check in `lambda/discord_command.py` is what guards it.
+Requests without a valid signature over the timestamp and body get a 401, and
+timestamps older than five minutes are refused to close the replay window. Set
+`discord_guild_id` to additionally pin the command to one server.
+
 ## :sparkles: Examples
 
 Please see the sample set of examples below for a better understanding of implementation
@@ -151,6 +192,8 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_config_seed_image"></a> [config\_seed\_image](#input\_config\_seed\_image) | Container image for the init container that seeds plugin\_configs onto the EFS volume. Only used when plugin\_configs is non-empty; needs a shell and base64 (busybox suffices). | `string` | `"public.ecr.aws/docker/library/busybox:stable"` | no |
 | <a name="input_cpu_architecture"></a> [cpu\_architecture](#input\_cpu\_architecture) | Task CPU architecture. Fargate Spot only supports X86\_64; use ARM64 only with use\_spot = false. | `string` | `"X86_64"` | no |
 | <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create a dedicated VPC (with public subnets, IGW, and routing). Set false to deploy into an existing VPC via vpc\_id + subnet\_ids. | `bool` | `true` | no |
+| <a name="input_discord_application_public_key"></a> [discord\_application\_public\_key](#input\_discord\_application\_public\_key) | Discord application public key (Developer Portal > General Information). When set, a Lambda Function URL is published as the app's interactions endpoint, backing a /minecraft slash command that starts the server and reports status. Not a secret — it only verifies Discord's request signatures. | `string` | `""` | no |
+| <a name="input_discord_guild_id"></a> [discord\_guild\_id](#input\_discord\_guild\_id) | Restrict the /minecraft slash command to a single Discord server (guild) ID. Empty allows any guild the app is installed in. Ignored unless discord\_application\_public\_key is set. | `string` | `""` | no |
 | <a name="input_discord_webhook_url"></a> [discord\_webhook\_url](#input\_discord\_webhook\_url) | Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF\_VAR\_discord\_webhook\_url; keep it out of version control. | `string` | `""` | no |
 | <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. "minecraft.hansohn.io"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name\_servers output. | `string` | n/a | yes |
 | <a name="input_efs_throughput_mode"></a> [efs\_throughput\_mode](#input\_efs\_throughput\_mode) | EFS throughput mode. Use "bursting" or "elastic"; avoid "provisioned" to keep costs down. | `string` | `"bursting"` | no |
@@ -181,6 +224,7 @@ Please see the sample set of examples below for a better understanding of implem
 
 | Name | Description |
 | ---- | ----------- |
+| <a name="output_discord_interactions_url"></a> [discord\_interactions\_url](#output\_discord\_interactions\_url) | Lambda Function URL to paste into the Discord Developer Portal as the app's Interactions Endpoint URL. Empty unless discord\_application\_public\_key is set. |
 | <a name="output_ecs_cluster_name"></a> [ecs\_cluster\_name](#output\_ecs\_cluster\_name) | ECS cluster name. |
 | <a name="output_ecs_service_name"></a> [ecs\_service\_name](#output\_ecs\_service\_name) | ECS service name. |
 | <a name="output_efs_id"></a> [efs\_id](#output\_efs\_id) | EFS file system ID holding the world data. |

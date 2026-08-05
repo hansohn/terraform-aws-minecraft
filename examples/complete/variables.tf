@@ -30,3 +30,15 @@ variable "discord_webhook_url" {
   sensitive   = true
   description = "Optional Discord webhook for start/stop notifications. Pass via TF_VAR_discord_webhook_url; do not commit it."
 }
+
+variable "discord_application_public_key" {
+  type        = string
+  default     = ""
+  description = "Optional Discord application public key. When set, publishes a /minecraft slash command that wakes the server and reports status."
+}
+
+variable "discord_guild_id" {
+  type        = string
+  default     = ""
+  description = "Optional Discord server (guild) ID to restrict the /minecraft slash command to."
+}
