@@ -3,7 +3,7 @@
 #
 # The hosted zone is global. Route53 query logging for a public zone, however,
 # REQUIRES its CloudWatch log group in us-east-1 — so the log group, its resource
-# policy, and the launcher plumbing (see lambda.tf) use the aws.us_east_1
+# policy, and the launcher plumbing (see launcher.tf) use the aws.us_east_1
 # provider while everything else stays in the compute region.
 ################################################################################
 

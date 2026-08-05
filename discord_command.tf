@@ -32,7 +32,7 @@ resource "aws_cloudwatch_log_group" "discord_command" {
 
 resource "aws_iam_role" "discord_command" {
   count              = local.discord_command_enabled ? 1 : 0
-  name_prefix        = "${local.name}-discord-cmd-"
+  name_prefix        = "${local.name}-discord-command-"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
   tags               = local.tags
 }
@@ -57,7 +57,7 @@ data "aws_iam_policy_document" "discord_command" {
 
 resource "aws_iam_role_policy" "discord_command" {
   count       = local.discord_command_enabled ? 1 : 0
-  name_prefix = "${local.name}-discord-cmd-"
+  name_prefix = "${local.name}-discord-command-"
   role        = aws_iam_role.discord_command[0].id
   policy      = data.aws_iam_policy_document.discord_command[0].json
 }
@@ -79,7 +79,7 @@ resource "aws_lambda_function" "discord_command" {
       CLUSTER            = aws_ecs_cluster.this.name
       SERVICE            = aws_ecs_service.this.name
       DOMAIN_NAME        = var.domain_name
-      GUILD_ID           = var.discord_guild_id
+      DISCORD_GUILD_ID   = var.discord_guild_id
     }
   }
 

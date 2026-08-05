@@ -95,7 +95,10 @@ resource "aws_iam_role_policy" "task" {
 }
 
 ################################################################################
-# Launcher Lambda role (IAM is global; the function itself runs in us-east-1)
+# Shared Lambda assume-role policy
+#
+# Used by every Lambda in the module (launcher, dns-reset, discord notifier,
+# discord command); each function's own permissions live beside its function.
 ################################################################################
 
 data "aws_iam_policy_document" "lambda_assume" {
@@ -107,30 +110,4 @@ data "aws_iam_policy_document" "lambda_assume" {
       identifiers = ["lambda.amazonaws.com"]
     }
   }
-}
-
-resource "aws_iam_role" "launcher" {
-  name_prefix        = "${local.name}-launcher-"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
-  tags               = local.tags
-}
-
-data "aws_iam_policy_document" "launcher" {
-  statement {
-    sid       = "Logs"
-    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = ["arn:aws:logs:*:*:*"]
-  }
-
-  statement {
-    sid       = "StartServer"
-    actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "launcher" {
-  name_prefix = "${local.name}-launcher-"
-  role        = aws_iam_role.launcher.id
-  policy      = data.aws_iam_policy_document.launcher.json
 }

@@ -1,5 +1,5 @@
 ################################################################################
-# Variables
+# Core
 ################################################################################
 
 variable "name" {
@@ -12,6 +12,15 @@ variable "domain_name" {
   type        = string
   description = "Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. \"minecraft.hansohn.io\"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name_servers output."
 }
+
+variable "tags" {
+  type        = map(string)
+  default     = {}
+  description = "Additional tags applied to all resources."
+}
+################################################################################
+# Network
+################################################################################
 
 variable "create_vpc" {
   type        = bool
@@ -36,6 +45,15 @@ variable "vpc_cidr" {
   default     = "10.100.0.0/24"
   description = "CIDR block for the VPC. Only used when create_vpc = true."
 }
+
+variable "allowed_cidrs" {
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+  description = "CIDR blocks allowed to reach the game port(s). Defaults to open (0.0.0.0/0); narrow to known player IPs to lock the server down. Note the port must stay reachable from wherever players connect for the wake-on-DNS launcher to trigger."
+}
+################################################################################
+# Compute (Fargate task)
+################################################################################
 
 variable "task_cpu" {
   type        = number
@@ -66,6 +84,9 @@ variable "cpu_architecture" {
   default     = "X86_64"
   description = "Task CPU architecture. Fargate Spot only supports X86_64; use ARM64 only with use_spot = false."
 }
+################################################################################
+# Minecraft server
+################################################################################
 
 variable "server_edition" {
   type        = string
@@ -82,12 +103,6 @@ variable "minecraft_image" {
   type        = string
   default     = ""
   description = "Minecraft server container image. Empty selects the edition default: itzg/minecraft-server for java, itzg/minecraft-bedrock-server for bedrock."
-}
-
-variable "watchdog_image" {
-  type        = string
-  default     = "doctorray/minecraft-ecsfargate-watchdog:latest"
-  description = "Watchdog sidecar image that points DNS at the task on boot and scales the service to zero when idle."
 }
 
 variable "minecraft_port" {
@@ -108,10 +123,50 @@ variable "enable_geyser" {
   description = "On a java server, also open the Bedrock UDP port (bedrock_port) for the Geyser plugin so Bedrock clients can join. For a native Bedrock server use server_edition = \"bedrock\" instead."
 }
 
+variable "additional_ports" {
+  type = list(object({
+    port     = number
+    protocol = string
+  }))
+  default     = []
+  description = "Extra ports to open on the task security group and map into the container, for plugins that need their own listener (e.g. Simple Voice Chat on UDP 24454, dynmap on TCP 8123). Each entry opens one ingress rule per allowed_cidrs block. protocol must be \"tcp\" or \"udp\"."
+
+  validation {
+    condition     = alltrue([for p in var.additional_ports : contains(["tcp", "udp"], p.protocol)])
+    error_message = "Each additional_ports protocol must be \"tcp\" or \"udp\"."
+  }
+}
+
 variable "minecraft_env" {
   type        = map(string)
   default     = {}
   description = "Extra environment variables for itzg/minecraft-server (e.g. TYPE, VERSION, MODPACK, AUTO_CURSEFORGE settings, CF_API_KEY). Merged over the EULA/MEMORY defaults."
+}
+
+variable "plugin_configs" {
+  type        = map(string)
+  default     = {}
+  description = "Files to seed onto the EFS /data volume before the server starts, keyed by path relative to /data (e.g. \"plugins/DiscordSRV/config.yml\"); values are the file contents. A lightweight init container writes each file only if it does not already exist, so the server/plugins can edit it afterward (delete the file on EFS to re-seed). Contents are stored in the task definition in plaintext — do NOT put secrets (bot tokens, passwords) here; reference those from the plugin config via its own secret mechanism."
+
+  validation {
+    condition     = alltrue([for path in keys(var.plugin_configs) : !can(regex("(^/|\\.\\.|')", path))])
+    error_message = "plugin_configs keys must be relative paths under /data without \"..\" segments or single quotes."
+  }
+}
+
+variable "config_seed_image" {
+  type        = string
+  default     = "public.ecr.aws/docker/library/busybox:stable"
+  description = "Container image for the init container that seeds plugin_configs onto the EFS volume. Only used when plugin_configs is non-empty; needs a shell and base64 (busybox suffices)."
+}
+################################################################################
+# Scale-to-zero lifecycle
+################################################################################
+
+variable "watchdog_image" {
+  type        = string
+  default     = "doctorray/minecraft-ecsfargate-watchdog:latest"
+  description = "Watchdog sidecar image that points DNS at the task on boot and scales the service to zero when idle."
 }
 
 variable "startup_minutes" {
@@ -125,11 +180,41 @@ variable "shutdown_minutes" {
   default     = 20
   description = "Idle time (minutes) with no players before the watchdog scales the service to zero."
 }
+################################################################################
+# Storage and backups
+################################################################################
 
 variable "efs_throughput_mode" {
   type        = string
   default     = "bursting"
   description = "EFS throughput mode. Use \"bursting\" or \"elastic\"; avoid \"provisioned\" to keep costs down."
+}
+
+variable "enable_backups" {
+  type        = bool
+  default     = false
+  description = "Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained)."
+}
+
+variable "backup_schedule" {
+  type        = string
+  default     = "cron(0 5 * * ? *)"
+  description = "Cron schedule (UTC) for EFS backups when enable_backups is true. Defaults to daily at 05:00 UTC."
+}
+
+variable "backup_retention_days" {
+  type        = number
+  default     = 35
+  description = "Days to retain each EFS backup recovery point when enable_backups is true."
+}
+################################################################################
+# Notifications and Discord
+################################################################################
+
+variable "notification_email" {
+  type        = string
+  default     = ""
+  description = "If set, subscribes this email address to the SNS topic for start/stop notifications."
 }
 
 variable "discord_webhook_url" {
@@ -150,12 +235,9 @@ variable "discord_guild_id" {
   default     = ""
   description = "Restrict the /minecraft slash command to a single Discord server (guild) ID. Empty allows any guild the app is installed in. Ignored unless discord_application_public_key is set."
 }
-
-variable "allowed_cidrs" {
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-  description = "CIDR blocks allowed to reach the game port(s). Defaults to open (0.0.0.0/0); narrow to known player IPs to lock the server down. Note the port must stay reachable from wherever players connect for the wake-on-DNS launcher to trigger."
-}
+################################################################################
+# Access and logging
+################################################################################
 
 variable "enable_ecs_exec" {
   type        = bool
@@ -163,69 +245,8 @@ variable "enable_ecs_exec" {
   description = "Enable ECS Exec on the task so operators can open a shell (or run rcon-cli) inside the running container via `aws ecs execute-command`. Access is gated entirely by IAM over SSM Session Manager — no inbound port is opened. Grants the task role ssmmessages permissions."
 }
 
-variable "additional_ports" {
-  type = list(object({
-    port     = number
-    protocol = string
-  }))
-  default     = []
-  description = "Extra ports to open on the task security group and map into the container, for plugins that need their own listener (e.g. Simple Voice Chat on UDP 24454, dynmap on TCP 8123). Each entry opens one ingress rule per allowed_cidrs block. protocol must be \"tcp\" or \"udp\"."
-
-  validation {
-    condition     = alltrue([for p in var.additional_ports : contains(["tcp", "udp"], p.protocol)])
-    error_message = "Each additional_ports protocol must be \"tcp\" or \"udp\"."
-  }
-}
-
-variable "plugin_configs" {
-  type        = map(string)
-  default     = {}
-  description = "Files to seed onto the EFS /data volume before the server starts, keyed by path relative to /data (e.g. \"plugins/DiscordSRV/config.yml\"); values are the file contents. A lightweight init container writes each file only if it does not already exist, so the server/plugins can edit it afterward (delete the file on EFS to re-seed). Contents are stored in the task definition in plaintext — do NOT put secrets (bot tokens, passwords) here; reference those from the plugin config via its own secret mechanism."
-
-  validation {
-    condition     = alltrue([for path in keys(var.plugin_configs) : !can(regex("(^/|\\.\\.|')", path))])
-    error_message = "plugin_configs keys must be relative paths under /data without \"..\" segments or single quotes."
-  }
-}
-
-variable "config_seed_image" {
-  type        = string
-  default     = "public.ecr.aws/docker/library/busybox:stable"
-  description = "Container image for the init container that seeds plugin_configs onto the EFS volume. Only used when plugin_configs is non-empty; needs a shell and base64 (busybox suffices)."
-}
-
-variable "enable_backups" {
-  type        = bool
-  default     = false
-  description = "Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained)."
-}
-
-variable "backup_schedule" {
-  type        = string
-  default     = "cron(0 5 * * ? *)"
-  description = "Cron schedule (UTC) for EFS backups when enable_backups is true. Defaults to daily at 05:00 UTC."
-}
-
-variable "backup_retention_days" {
-  type        = number
-  default     = 35
-  description = "Days to retain each EFS backup recovery point when enable_backups is true."
-}
-
 variable "log_retention_days" {
   type        = number
   default     = 7
   description = "CloudWatch Logs retention for container, DNS query, and Lambda logs."
-}
-
-variable "notification_email" {
-  type        = string
-  default     = ""
-  description = "If set, subscribes this email address to the SNS topic for start/stop notifications."
-}
-
-variable "tags" {
-  type        = map(string)
-  default     = {}
-  description = "Additional tags applied to all resources."
 }

@@ -60,3 +60,31 @@ resource "aws_cloudwatch_log_subscription_filter" "querylog" {
 
   depends_on = [aws_lambda_permission.querylog]
 }
+
+resource "aws_iam_role" "launcher" {
+  name_prefix        = "${local.name}-launcher-"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+  tags               = local.tags
+}
+
+data "aws_iam_policy_document" "launcher" {
+  statement {
+    sid       = "Logs"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["arn:aws:logs:*:*:*"]
+  }
+
+  # Same dependency cycle as the task role's ScaleSelf statement (service ->
+  # task def -> ... -> service), so the service ARN can't be referenced here.
+  statement {
+    sid       = "StartServer"
+    actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "launcher" {
+  name_prefix = "${local.name}-launcher-"
+  role        = aws_iam_role.launcher.id
+  policy      = data.aws_iam_policy_document.launcher.json
+}
