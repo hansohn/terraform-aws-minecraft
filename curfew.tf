@@ -18,6 +18,9 @@
 locals {
   curfew_enabled = var.enable_curfew && length(var.wake_windows) > 0
 
+  # In-game warnings need RCON, which native Bedrock servers do not have.
+  curfew_announcer_enabled = local.curfew_enabled && !local.is_bedrock
+
   day_after = {
     mon = "TUE", tue = "WED", wed = "THU", thu = "FRI",
     fri = "SAT", sat = "SUN", sun = "MON",
@@ -72,8 +75,11 @@ locals {
 # through Discord and email but not in-game.
 ################################################################################
 
+# Java only. A native Bedrock server has no RCON at all, so the sidecar would
+# spin on its readiness loop forever and warn nobody. The curfew STOP still
+# works there — only the in-game announcement is unavailable.
 resource "random_password" "rcon" {
-  count   = local.curfew_enabled ? 1 : 0
+  count   = local.curfew_announcer_enabled ? 1 : 0
   length  = 32
   special = false
 }

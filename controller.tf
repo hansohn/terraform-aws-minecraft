@@ -171,6 +171,17 @@ data "aws_iam_policy_document" "invoke_controller" {
 resource "aws_scheduler_schedule_group" "this" {
   name = local.name
   tags = local.tags
+
+  lifecycle {
+    # enable_curfew with no windows has nothing to schedule against, so it
+    # would silently do nothing at all. Fail loudly instead — this lives on an
+    # unconditional resource because the curfew resources themselves are
+    # for_each'd over an empty map in exactly the case we need to catch.
+    precondition {
+      condition     = !var.enable_curfew || length(var.wake_windows) > 0
+      error_message = "enable_curfew requires wake_windows to be non-empty — a curfew is the close of a window, so with no windows there is nothing to close."
+    }
+  }
 }
 
 resource "aws_iam_role" "scheduler" {

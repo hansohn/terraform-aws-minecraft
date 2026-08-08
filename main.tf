@@ -48,7 +48,7 @@ locals {
     # password always matches the one the sidecar was handed — a caller-supplied
     # RCON_PASSWORD would otherwise silently break the in-game warnings. RCON
     # stays bound to the task's network namespace; no port is opened.
-    local.curfew_enabled ? {
+    local.curfew_announcer_enabled ? {
       ENABLE_RCON   = "true"
       RCON_PASSWORD = one(random_password.rcon[*].result)
     } : {},
