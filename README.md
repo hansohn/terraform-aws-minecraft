@@ -252,11 +252,17 @@ and there's no way to tell "starting" from "broken". Setting
 | `/minecraft stop [minutes]` | privileged | stops now, or warns and stops later |
 | `/minecraft gate …` | privileged | see "The wake gate" below |
 
-"Privileged" means holding `discord_privileged_role_id`. Leave it empty and
-guild membership alone is enough, which is how the command behaved before
-0.8.0 — so upgrading doesn't lock anyone out. Gate operations are nested under
-a subcommand group deliberately: `block` means a great many things on a
-Minecraft server and none of them are this.
+"Privileged" means holding `discord_privileged_role_id`. Gate operations are
+nested under a subcommand group deliberately: `block` means a great many things
+on a Minecraft server and none of them are this.
+
+> :warning: **If you configure `wake_windows`, set `discord_privileged_role_id`
+> too.** Left empty it means "any guild member", which is the pre-0.8.0
+> behaviour and fine while there are no hours to enforce — but with hours
+> configured it would make `/minecraft start` a one-command way around the
+> schedule for exactly the people it is meant to constrain. So once windows
+> exist, an unset role means *nobody* is privileged: members can still wake the
+> server by connecting during open hours, but nothing bypasses the schedule.
 
 Readiness still arrives through the existing `discord_webhook_url`
 notification, so set both to close the loop.
@@ -446,7 +452,13 @@ AWS credentials at all.
 
 It is off by default because it disconnects players mid-session. The itzg image
 handles `SIGTERM` and saves the world, so there is no data loss, but the exit is
-abrupt.
+abrupt. `enable_curfew` without `wake_windows` is a plan-time error rather than
+a silent no-op — a curfew is the close of a window, so with no windows there is
+nothing to close.
+
+In-game warnings are **Java only**. A native Bedrock server
+(`server_edition = "bedrock"`) has no RCON, so the sidecar is not added there
+and the curfew stop happens with out-of-game warning only.
 
 Ad-hoc stops use the same machinery, for maintenance:
 
@@ -521,12 +533,12 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_curfew_warning_minutes"></a> [curfew\_warning\_minutes](#input\_curfew\_warning\_minutes) | How long before a curfew stop to start warning players, in-game via the announcer sidecar and in Discord via the SNS topic. Also the default lead time for an ad-hoc `/minecraft stop` with no argument-supplied delay. Ignored unless enable\_curfew is true. | `number` | `10` | no |
 | <a name="input_discord_application_public_key"></a> [discord\_application\_public\_key](#input\_discord\_application\_public\_key) | Discord application public key (Developer Portal > General Information). When set, a Lambda Function URL is published as the app's interactions endpoint, backing a /minecraft slash command that starts the server and reports status. Not a secret — it only verifies Discord's request signatures. | `string` | `""` | no |
 | <a name="input_discord_guild_id"></a> [discord\_guild\_id](#input\_discord\_guild\_id) | Restrict the /minecraft slash command to a single Discord server (guild) ID. Empty allows any guild the app is installed in. Ignored unless discord\_application\_public\_key is set. | `string` | `""` | no |
-| <a name="input_discord_privileged_role_id"></a> [discord\_privileged\_role\_id](#input\_discord\_privileged\_role\_id) | Discord role ID allowed to run the privileged /minecraft subcommands (start, stop, and the gate group). Empty keeps the pre-0.8.0 behaviour where guild membership alone is enough, so upgrading does not lock existing users out. Ignored unless discord\_application\_public\_key is set. | `string` | `""` | no |
+| <a name="input_discord_privileged_role_id"></a> [discord\_privileged\_role\_id](#input\_discord\_privileged\_role\_id) | Discord role ID allowed to run the privileged /minecraft subcommands (start, stop, and the gate group). Empty keeps the pre-0.8.0 behaviour where guild membership alone is enough — but ONLY while wake\_windows is empty. Once hours are configured, treating every member as privileged would make `/minecraft start` a one-command way around the schedule, so an unset role means nobody holds privilege and members wake the server the way they always could: by connecting during open hours. SET THIS if you configure wake\_windows and still want a bypass for yourself. Ignored unless discord\_application\_public\_key is set. | `string` | `""` | no |
 | <a name="input_discord_webhook_url"></a> [discord\_webhook\_url](#input\_discord\_webhook\_url) | Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF\_VAR\_discord\_webhook\_url; keep it out of version control. | `string` | `""` | no |
 | <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. "minecraft.hansohn.io"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name\_servers output. | `string` | n/a | yes |
 | <a name="input_efs_throughput_mode"></a> [efs\_throughput\_mode](#input\_efs\_throughput\_mode) | EFS throughput mode. Use "bursting" or "elastic"; avoid "provisioned" to keep costs down. | `string` | `"bursting"` | no |
 | <a name="input_enable_backups"></a> [enable\_backups](#input\_enable\_backups) | Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained). | `bool` | `false` | no |
-| <a name="input_enable_curfew"></a> [enable\_curfew](#input\_enable\_curfew) | Stop a RUNNING server when its wake\_window closes, rather than only refusing to start a new one. Off by default because it disconnects players mid-session — the itzg image handles SIGTERM and saves the world, so there is no data loss, but the exit is abrupt. Requires wake\_windows to be non-empty. Also adds the announcer sidecar so players get in-game warning first. | `bool` | `false` | no |
+| <a name="input_enable_curfew"></a> [enable\_curfew](#input\_enable\_curfew) | Stop a RUNNING server when its wake\_window closes, rather than only refusing to start a new one. Off by default because it disconnects players mid-session — the itzg image handles SIGTERM and saves the world, so there is no data loss, but the exit is abrupt. Requires wake\_windows to be non-empty; enabling it without them is a plan-time error rather than a silent no-op. On a Java server it also adds the announcer sidecar so players are warned in-game first; native Bedrock servers have no RCON, so there the stop still happens but the warning is out-of-game only. | `bool` | `false` | no |
 | <a name="input_enable_dns_wake"></a> [enable\_dns\_wake](#input\_enable\_dns\_wake) | Build the DNS wake path: a Route53 query-log subscription filter and the relay Lambda that forwards to the controller. Waking on DNS is unauthenticated by construction — the filter matches every query log event and the relay inspects none of it, so automated scanners reach the controller as readily as players do (the gate is what decides whether they get a server). Set to false to drop that path entirely, leaving the Discord /minecraft command as the way in; with neither enabled the service starts only via the controller (see the controller\_function\_name output). Route53 query logging stays on either way, so unexpected starts remain attributable. | `bool` | `true` | no |
 | <a name="input_enable_ecs_exec"></a> [enable\_ecs\_exec](#input\_enable\_ecs\_exec) | Enable ECS Exec on the task so operators can open a shell (or run rcon-cli) inside the running container via `aws ecs execute-command`. Access is gated entirely by IAM over SSM Session Manager — no inbound port is opened. Grants the task role ssmmessages permissions. | `bool` | `false` | no |
 | <a name="input_enable_geyser"></a> [enable\_geyser](#input\_enable\_geyser) | On a java server, also open the Bedrock UDP port (bedrock\_port) for the Geyser plugin so Bedrock clients can join. For a native Bedrock server use server\_edition = "bedrock" instead. | `bool` | `false` | no |

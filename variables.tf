@@ -239,7 +239,7 @@ variable "discord_guild_id" {
 variable "discord_privileged_role_id" {
   type        = string
   default     = ""
-  description = "Discord role ID allowed to run the privileged /minecraft subcommands (start, stop, and the gate group). Empty keeps the pre-0.8.0 behaviour where guild membership alone is enough, so upgrading does not lock existing users out. Ignored unless discord_application_public_key is set."
+  description = "Discord role ID allowed to run the privileged /minecraft subcommands (start, stop, and the gate group). Empty keeps the pre-0.8.0 behaviour where guild membership alone is enough — but ONLY while wake_windows is empty. Once hours are configured, treating every member as privileged would make `/minecraft start` a one-command way around the schedule, so an unset role means nobody holds privilege and members wake the server the way they always could: by connecting during open hours. SET THIS if you configure wake_windows and still want a bypass for yourself. Ignored unless discord_application_public_key is set."
 }
 ################################################################################
 # Wake gating and hours of operation
@@ -304,7 +304,7 @@ variable "wake_windows" {
 variable "enable_curfew" {
   type        = bool
   default     = false
-  description = "Stop a RUNNING server when its wake_window closes, rather than only refusing to start a new one. Off by default because it disconnects players mid-session — the itzg image handles SIGTERM and saves the world, so there is no data loss, but the exit is abrupt. Requires wake_windows to be non-empty. Also adds the announcer sidecar so players get in-game warning first."
+  description = "Stop a RUNNING server when its wake_window closes, rather than only refusing to start a new one. Off by default because it disconnects players mid-session — the itzg image handles SIGTERM and saves the world, so there is no data loss, but the exit is abrupt. Requires wake_windows to be non-empty; enabling it without them is a plan-time error rather than a silent no-op. On a Java server it also adds the announcer sidecar so players are warned in-game first; native Bedrock servers have no RCON, so there the stop still happens but the warning is out-of-game only."
 }
 
 variable "curfew_warning_minutes" {

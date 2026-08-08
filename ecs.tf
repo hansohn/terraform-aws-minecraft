@@ -146,7 +146,7 @@ resource "aws_ecs_task_definition" "this" {
         }
       }
     }
-    ] : [], local.curfew_enabled ? [
+    ] : [], local.curfew_announcer_enabled ? [
     # Announcer sidecar: warns players in-game before a curfew stop. Talks to
     # RCON over localhost (shared task network namespace), so nothing is exposed
     # beyond the task and it needs no AWS credentials. Not essential — if it

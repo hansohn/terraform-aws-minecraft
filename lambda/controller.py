@@ -445,11 +445,19 @@ def _schedule_stop(at, reason):
 def _is_privileged(event):
     if event.get("source") != "discord":
         return False
-    if not PRIVILEGED_ROLE_ID:
-        # No role configured: guild membership alone suffices, matching the
-        # pre-0.8.0 behaviour so upgrades do not lock existing users out.
-        return True
-    return PRIVILEGED_ROLE_ID in (event.get("member_role_ids") or [])
+
+    if PRIVILEGED_ROLE_ID:
+        return PRIVILEGED_ROLE_ID in (event.get("member_role_ids") or [])
+
+    # No role configured. With no hours to enforce there is nothing to bypass,
+    # so guild membership alone suffices and upgrades do not lock anyone out.
+    #
+    # Once wake_windows exist that stops being safe: treating every member as
+    # privileged would make `/minecraft start` a one-command way around the
+    # schedule for exactly the people it is meant to constrain. So nobody is
+    # privileged until a role is named, and members fall back to waking the
+    # server the same way they always could — by connecting during open hours.
+    return not WAKE_WINDOWS
 
 
 PRIVILEGED_ACTIONS = ("start", "stop", "set_mode", "override")
@@ -460,7 +468,18 @@ def handler(event, context):
     source = event.get("source") or "unknown"
 
     if action in PRIVILEGED_ACTIONS and source == "discord" and not _is_privileged(event):
-        return {"error": "not permitted", "action": action, "privileged": False}
+        # Say why, because the most likely cause is a misconfiguration rather
+        # than a genuine refusal: hours are set but no privileged role is named,
+        # so there is nobody this could ever permit.
+        if not PRIVILEGED_ROLE_ID and WAKE_WINDOWS:
+            detail = (
+                "hours are configured but discord_privileged_role_id is not set, "
+                "so no one holds privilege"
+            )
+        else:
+            detail = "you do not hold the privileged role"
+        print(f"DENIED {action} from discord: {detail}")
+        return {"error": f"not permitted — {detail}", "action": action, "privileged": False}
 
     if action in ("stop", "set_mode", "override", "warn") and source not in (
         "discord",
