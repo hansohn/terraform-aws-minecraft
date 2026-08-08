@@ -46,3 +46,13 @@ output "vpc_id" {
   description = "VPC ID hosting the server (created or caller-supplied)."
   value       = local.vpc_id
 }
+
+output "controller_function_name" {
+  description = "Lambda that owns starting and stopping the service — the only role holding ecs:UpdateService. Start the server without Discord or a DNS query: aws lambda invoke --function-name <this> --payload '{\"action\":\"start\",\"source\":\"cli\"}' /dev/stdout. The gate still applies to this path, so a start while the mode is \"disable\" is refused; change the gate first via gate_parameter_name."
+  value       = aws_lambda_function.controller.function_name
+}
+
+output "gate_parameter_name" {
+  description = "SSM parameter holding the runtime wake-gate state. Change the mode without Discord: aws ssm put-parameter --name <this> --overwrite --value '{\"version\":1,\"mode\":\"disable\"}'."
+  value       = aws_ssm_parameter.gate.name
+}

@@ -61,6 +61,26 @@ module "minecraft" {
   discord_application_public_key = var.discord_application_public_key
   discord_guild_id               = var.discord_guild_id
 
+  # Only this Discord role may run start/stop and change the gate. Left empty,
+  # guild membership alone is enough — which is the pre-0.8.0 behaviour.
+  discord_privileged_role_id = var.discord_privileged_role_id
+
+  # Hours during which a DNS lookup may wake the server. Outside them the name
+  # still resolves but nothing starts, which is what keeps scanners — and
+  # after-hours players — from booting the task. Empty list = no restriction.
+  wake_default_mode = "schedule"
+  wake_timezone     = "America/Los_Angeles"
+  wake_windows = [
+    { days = ["mon", "tue", "wed", "thu"], start = "15:30", end = "20:30" },
+    { days = ["fri"], start = "15:30", end = "22:00" },
+    { days = ["sat", "sun"], start = "09:00", end = "22:00" },
+  ]
+
+  # Also stop a server that is ALREADY RUNNING when its window closes, warning
+  # players in-game first. Off by default because it disconnects them mid-game.
+  enable_curfew          = true
+  curfew_warning_minutes = 10
+
   tags = {
     Environment = "personal"
   }

@@ -37,29 +37,15 @@ resource "aws_iam_role" "discord_command" {
   tags               = local.tags
 }
 
-data "aws_iam_policy_document" "discord_command" {
-  count = local.discord_command_enabled ? 1 : 0
-
-  statement {
-    sid       = "Logs"
-    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = ["arn:aws:logs:*:*:*"]
-  }
-
-  # Same dependency cycle as the task role's ScaleSelf statement (service ->
-  # task def -> ... -> service), so the service ARN can't be referenced here.
-  statement {
-    sid       = "StartServer"
-    actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
-    resources = ["*"]
-  }
-}
-
+# Log-writing plus lambda:InvokeFunction on the controller, and nothing else —
+# no ECS permissions at all. A privileged Discord user still bypasses the gate,
+# but only because the controller decides that after re-deriving privilege from
+# the signed role IDs; this function cannot reach the service on its own.
 resource "aws_iam_role_policy" "discord_command" {
   count       = local.discord_command_enabled ? 1 : 0
   name_prefix = "${local.name}-discord-command-"
   role        = aws_iam_role.discord_command[0].id
-  policy      = data.aws_iam_policy_document.discord_command[0].json
+  policy      = data.aws_iam_policy_document.invoke_controller.json
 }
 
 resource "aws_lambda_function" "discord_command" {
@@ -75,11 +61,10 @@ resource "aws_lambda_function" "discord_command" {
 
   environment {
     variables = {
-      DISCORD_PUBLIC_KEY = var.discord_application_public_key
-      CLUSTER            = aws_ecs_cluster.this.name
-      SERVICE            = aws_ecs_service.this.name
-      DOMAIN_NAME        = var.domain_name
-      DISCORD_GUILD_ID   = var.discord_guild_id
+      DISCORD_PUBLIC_KEY       = var.discord_application_public_key
+      CONTROLLER_FUNCTION_NAME = aws_lambda_function.controller.function_name
+      DOMAIN_NAME              = var.domain_name
+      DISCORD_GUILD_ID         = var.discord_guild_id
     }
   }
 

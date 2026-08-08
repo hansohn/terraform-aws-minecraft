@@ -146,6 +146,33 @@ resource "aws_ecs_task_definition" "this" {
         }
       }
     }
+    ] : [], local.curfew_enabled ? [
+    # Announcer sidecar: warns players in-game before a curfew stop. Talks to
+    # RCON over localhost (shared task network namespace), so nothing is exposed
+    # beyond the task and it needs no AWS credentials. Not essential — if it
+    # dies the server keeps running, unwarned.
+    {
+      name      = "curfew-announcer"
+      image     = local.curfew_announcer_image
+      essential = false
+      command   = ["sh", "-c", local.curfew_announcer_script]
+
+      environment = [
+        { name = "TZ", value = var.wake_timezone },
+        { name = "RCON_HOST", value = "localhost" },
+        { name = "RCON_PORT", value = "25575" },
+        { name = "RCON_PASSWORD", value = one(random_password.rcon[*].result) },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.server.name
+          "awslogs-region"        = local.region
+          "awslogs-stream-prefix" = "curfew-announcer"
+        }
+      }
+    }
   ] : []))
 }
 

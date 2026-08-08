@@ -44,6 +44,14 @@ locals {
       MEMORY = var.java_memory
     },
     var.minecraft_env,
+    # Curfew needs RCON reachable from the announcer sidecar. Merged LAST so the
+    # password always matches the one the sidecar was handed — a caller-supplied
+    # RCON_PASSWORD would otherwise silently break the in-game warnings. RCON
+    # stays bound to the task's network namespace; no port is opened.
+    local.curfew_enabled ? {
+      ENABLE_RCON   = "true"
+      RCON_PASSWORD = one(random_password.rcon[*].result)
+    } : {},
   )
 
   # Cartesian product of additional_ports x allowed_cidrs, keyed stably so the
