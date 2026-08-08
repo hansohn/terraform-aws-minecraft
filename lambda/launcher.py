@@ -1,30 +1,36 @@
-"""Wake the Minecraft server on a Route53 DNS query.
+"""Relay a Route53 query-log delivery to the controller.
 
-Triggered by a CloudWatch Logs subscription filter on the Route53 query log
-group. Any invocation means someone tried to resolve the server hostname, so we
-set the ECS service desired count to 1. The call is idempotent — if the service
-is already running we do nothing. The watchdog sidecar scales it back to 0 when
-the server goes idle.
+A CloudWatch Logs subscription filter on the Route53 query log fires this
+whenever anyone resolves the server hostname. It forwards a start request to the
+controller and returns; the controller decides whether that request is honoured.
+
+This function deliberately inspects NOTHING. The subscription filter matches
+every event, and looking at query names or record types here would be a false
+comfort: three of the five queries in the incident that motivated the gate were
+plain A lookups, indistinguishable from a real player. Authorisation is a
+question about time and policy, not about the packet, so it lives in one place
+and this stays a wire.
+
+Invoked asynchronously — CloudWatch Logs discards the return value, so there is
+nothing to wait for, and Lambda's async retry is safe because setting
+desiredCount to 1 is idempotent.
 """
 
+import json
 import os
 
 import boto3
 
-ecs = boto3.client("ecs", region_name=os.environ["REGION"])
+lambda_client = boto3.client("lambda", region_name=os.environ["REGION"])
 
-CLUSTER = os.environ["CLUSTER"]
-SERVICE = os.environ["SERVICE"]
+CONTROLLER_ARN = os.environ["CONTROLLER_ARN"]
 
 
 def handler(event, context):
-    services = ecs.describe_services(cluster=CLUSTER, services=[SERVICE])["services"]
-    desired = services[0]["desiredCount"] if services else 0
-
-    if desired > 0:
-        print(f"{SERVICE} already running (desiredCount={desired}); nothing to do")
-        return {"running": True, "started": False}
-
-    ecs.update_service(cluster=CLUSTER, service=SERVICE, desiredCount=1)
-    print(f"Started {SERVICE} (set desiredCount=1)")
-    return {"running": True, "started": True}
+    lambda_client.invoke(
+        FunctionName=CONTROLLER_ARN,
+        InvocationType="Event",
+        Payload=json.dumps({"action": "start", "source": "dns"}).encode(),
+    )
+    print("Forwarded a DNS wake request to the controller")
+    return {"forwarded": True}

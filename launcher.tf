@@ -1,18 +1,18 @@
 ################################################################################
-# Launcher Lambda (us-east-1: must match the query log group's region)
+# DNS wake relay (us-east-1: must match the query log group's region)
 #
 # A CloudWatch Logs subscription filter on the Route53 query log fires this
-# function whenever someone resolves the server hostname. It sets the ECS
-# service desired count to 1 (a cross-region call to the compute region). The
-# watchdog sidecar scales it back to 0 once the server is idle.
+# function whenever someone resolves the server hostname. It forwards a start
+# request to the controller and stops there — it holds no ECS permissions and
+# cannot start anything itself. Whether the request is honoured is the gate's
+# decision (see controller.tf).
 #
-# Optional (enable_dns_wake, default true). Waking on a DNS query means ANY
-# resolver wakes the server: the subscription filter matches every event and
-# launcher.py inspects none of it, so a scanner querying SOA — or any record
-# type, or a name that does not exist — starts the task just as well as a
-# player's A lookup. Set enable_dns_wake = false to remove this path and drive
-# starts from the Discord /minecraft command instead, which is signature-
-# verified and callable only from your guild.
+# Optional (enable_dns_wake, default true). Waking on a DNS query is
+# unauthenticated by construction: the filter matches every event and the relay
+# inspects none of it, so automated DNS scanners reach the controller as readily
+# as players do. That is survivable now that the controller decides, but set
+# enable_dns_wake = false to remove the path entirely and drive starts from the
+# signature-verified Discord command instead.
 #
 # Route53 query logging (dns.tf) stays on either way — it is the only record of
 # who is resolving the hostname, and it is what makes an unexpected start
@@ -47,14 +47,15 @@ resource "aws_lambda_function" "launcher" {
   handler          = "launcher.handler"
   filename         = data.archive_file.launcher[0].output_path
   source_code_hash = data.archive_file.launcher[0].output_base64sha256
-  timeout          = 30
+  timeout          = 10
   tags             = local.tags
 
   environment {
     variables = {
-      REGION  = local.region
-      CLUSTER = aws_ecs_cluster.this.name
-      SERVICE = aws_ecs_service.this.name
+      # The controller lives in the compute region; boto3 cannot infer that from
+      # the ARN, so the client is pinned explicitly.
+      REGION         = local.region
+      CONTROLLER_ARN = local.controller_arn
     }
   }
 
@@ -89,27 +90,9 @@ resource "aws_iam_role" "launcher" {
   tags               = local.tags
 }
 
-data "aws_iam_policy_document" "launcher" {
-  count = local.dns_wake_enabled ? 1 : 0
-
-  statement {
-    sid       = "Logs"
-    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = ["arn:aws:logs:*:*:*"]
-  }
-
-  # Same dependency cycle as the task role's ScaleSelf statement (service ->
-  # task def -> ... -> service), so the service ARN can't be referenced here.
-  statement {
-    sid       = "StartServer"
-    actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
-    resources = ["*"]
-  }
-}
-
 resource "aws_iam_role_policy" "launcher" {
   count       = local.dns_wake_enabled ? 1 : 0
   name_prefix = "${local.name}-launcher-"
   role        = aws_iam_role.launcher[0].id
-  policy      = data.aws_iam_policy_document.launcher[0].json
+  policy      = data.aws_iam_policy_document.invoke_controller.json
 }

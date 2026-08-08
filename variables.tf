@@ -235,15 +235,97 @@ variable "discord_guild_id" {
   default     = ""
   description = "Restrict the /minecraft slash command to a single Discord server (guild) ID. Empty allows any guild the app is installed in. Ignored unless discord_application_public_key is set."
 }
+
+variable "discord_privileged_role_id" {
+  type        = string
+  default     = ""
+  description = "Discord role ID allowed to run the privileged /minecraft subcommands (start, stop, and the gate group). Empty keeps the pre-0.8.0 behaviour where guild membership alone is enough, so upgrading does not lock existing users out. Ignored unless discord_application_public_key is set."
+}
 ################################################################################
-# Access and logging
+# Wake gating and hours of operation
+#
+# enable_dns_wake decides whether the DNS wake path is BUILT; the gate decides
+# whether it is OPEN. They are deliberately separate: the first is a deploy-time
+# posture (a Discord-only deployment removes the path entirely), the second is
+# runtime state an operator flips without an apply.
+#
+# The windows below are declarative and live here; only mutable state (mode and
+# any temporary override) lives in the SSM parameter — see gate.tf.
 ################################################################################
 
 variable "enable_dns_wake" {
   type        = bool
   default     = true
-  description = "Start the server whenever anyone resolves the hostname. Unauthenticated by design — the subscription filter matches every Route53 query log event and the launcher inspects none of it, so automated DNS scanners wake the server as readily as players do. Set to false to drop the launcher Lambda and its subscription filter, leaving the Discord /minecraft command (see discord_application_public_key) as the wake path; with neither enabled the service starts only by hand via `aws ecs update-service --desired-count 1`. Route53 query logging stays on either way, so unexpected starts remain attributable."
+  description = "Build the DNS wake path: a Route53 query-log subscription filter and the relay Lambda that forwards to the controller. Waking on DNS is unauthenticated by construction — the filter matches every query log event and the relay inspects none of it, so automated scanners reach the controller as readily as players do (the gate is what decides whether they get a server). Set to false to drop that path entirely, leaving the Discord /minecraft command as the way in; with neither enabled the service starts only via the controller (see the controller_function_name output). Route53 query logging stays on either way, so unexpected starts remain attributable."
 }
+
+variable "wake_default_mode" {
+  type        = string
+  default     = "enable"
+  description = "Initial gate mode seeded into the SSM parameter: \"enable\" (DNS queries may start the task), \"disable\" (they may not), or \"schedule\" (they may, but only inside wake_windows). NOTE: the parameter carries ignore_changes on its value because Discord and the CLI mutate it, so this is a CREATE-TIME setting only — changing it later will not update an existing parameter. Use the /minecraft gate subcommands or `aws ssm put-parameter --overwrite` instead."
+
+  validation {
+    condition     = contains(["enable", "disable", "schedule"], var.wake_default_mode)
+    error_message = "wake_default_mode must be one of: enable, disable, schedule."
+  }
+}
+
+variable "wake_timezone" {
+  type        = string
+  default     = "UTC"
+  description = "IANA timezone the wake_windows are expressed in, e.g. \"America/Los_Angeles\". Handled by Python's zoneinfo, so daylight saving transitions are applied automatically and windows do not drift. Only used when the gate mode is \"schedule\"."
+
+  validation {
+    condition     = can(regex("^(UTC|[A-Za-z]+(/[A-Za-z0-9_+-]+)+)$", var.wake_timezone))
+    error_message = "wake_timezone must be \"UTC\" or an IANA zone name such as \"America/Los_Angeles\" (abbreviations like \"PST\" are not valid)."
+  }
+}
+
+variable "wake_windows" {
+  type = list(object({
+    days  = list(string)
+    start = string
+    end   = string
+  }))
+  default     = []
+  description = "Hours during which DNS queries may start the task, in wake_timezone, when the gate mode is \"schedule\". Days are mon..sun; start/end are zero-padded 24h \"HH:MM\". A window whose end is earlier than its start wraps past midnight and belongs to its START day. EMPTY MEANS NO RESTRICTION, which is what keeps this opt-in and leaves existing deployments unchanged."
+
+  validation {
+    condition = alltrue([
+      for w in var.wake_windows : alltrue([
+        for d in w.days : contains(["mon", "tue", "wed", "thu", "fri", "sat", "sun"], lower(d))
+      ]) && can(regex("^([01][0-9]|2[0-3]):[0-5][0-9]$", w.start))
+      && can(regex("^([01][0-9]|2[0-3]):[0-5][0-9]$", w.end))
+    ])
+    error_message = "Each wake_windows entry needs days drawn from mon..sun and start/end as zero-padded 24h HH:MM (e.g. \"15:30\")."
+  }
+}
+
+variable "enable_curfew" {
+  type        = bool
+  default     = false
+  description = "Stop a RUNNING server when its wake_window closes, rather than only refusing to start a new one. Off by default because it disconnects players mid-session — the itzg image handles SIGTERM and saves the world, so there is no data loss, but the exit is abrupt. Requires wake_windows to be non-empty. Also adds the announcer sidecar so players get in-game warning first."
+}
+
+variable "curfew_warning_minutes" {
+  type        = number
+  default     = 10
+  description = "How long before a curfew stop to start warning players, in-game via the announcer sidecar and in Discord via the SNS topic. Also the default lead time for an ad-hoc `/minecraft stop` with no argument-supplied delay. Ignored unless enable_curfew is true."
+
+  validation {
+    condition     = var.curfew_warning_minutes >= 0 && var.curfew_warning_minutes <= 60
+    error_message = "curfew_warning_minutes must be between 0 and 60."
+  }
+}
+
+variable "curfew_announcer_image" {
+  type        = string
+  default     = ""
+  description = "Image for the announcer sidecar that issues in-game warnings over RCON on localhost. Empty uses the same image as the server, which already ships rcon-cli — so no extra pull and no image to build. Ignored unless enable_curfew is true."
+}
+################################################################################
+# Access and logging
+################################################################################
 
 variable "enable_ecs_exec" {
   type        = bool

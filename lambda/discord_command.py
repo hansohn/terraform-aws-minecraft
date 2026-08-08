@@ -16,6 +16,7 @@ import os
 import time
 
 import boto3
+from botocore.config import Config
 
 ################################################################################
 # Ed25519 verification (RFC 8032)
@@ -113,13 +114,27 @@ def _verify(public_key, message, signature):
 
 ################################################################################
 # Interaction handling
+#
+# This function verifies Discord's signature, works out which subcommand was
+# invoked, and forwards it to the controller. It holds no ECS permissions: the
+# controller is the only thing that can start or stop the service, and it
+# re-derives privilege from the role IDs inside the signed body rather than
+# trusting anything computed here.
+#
+# All player-facing wording lives in this file so the controller stays
+# Discord-agnostic and returns structured JSON.
 ################################################################################
 
-ecs = boto3.client("ecs")
+lambda_client = boto3.client(
+    "lambda",
+    # Discord gives an interaction three seconds. Bound the call so a slow
+    # controller degrades into a readable message instead of Discord's
+    # "The application did not respond".
+    config=Config(connect_timeout=1, read_timeout=2, retries={"max_attempts": 0}),
+)
 
 PUBLIC_KEY = bytes.fromhex(os.environ["DISCORD_PUBLIC_KEY"])
-CLUSTER = os.environ["CLUSTER"]
-SERVICE = os.environ["SERVICE"]
+CONTROLLER = os.environ["CONTROLLER_FUNCTION_NAME"]
 DOMAIN_NAME = os.environ["DOMAIN_NAME"]
 GUILD_ID = os.environ["DISCORD_GUILD_ID"]
 
@@ -131,6 +146,12 @@ PING = 1
 APPLICATION_COMMAND = 2
 CHANNEL_MESSAGE = 4
 EPHEMERAL = 64
+
+SUB_COMMAND = 1
+SUB_COMMAND_GROUP = 2
+
+MODE_SUBCOMMANDS = ("enable", "disable", "schedule")
+OVERRIDE_SUBCOMMANDS = ("allow", "block")
 
 
 def _json(payload, status=200):
@@ -148,40 +169,140 @@ def _reply(content, ephemeral=False):
     return _json({"type": CHANNEL_MESSAGE, "data": data})
 
 
-def _counts():
-    services = ecs.describe_services(cluster=CLUSTER, services=[SERVICE])["services"]
-    if not services:
-        return 0, 0
-    return services[0]["desiredCount"], services[0]["runningCount"]
+def _subcommand(interaction):
+    """(group, name, args) for the invoked subcommand.
+
+    Gate operations are nested under a subcommand group so their verbs cannot be
+    misread as per-player actions — "block" in a Minecraft server means a great
+    deal of things, and none of them are this.
+    """
+    options = (interaction.get("data") or {}).get("options") or []
+    if not options:
+        return None, "status", {}
+
+    first = options[0]
+    if first.get("type") == SUB_COMMAND_GROUP:
+        inner = (first.get("options") or [{}])[0]
+        args = {o["name"]: o.get("value") for o in (inner.get("options") or [])}
+        return first.get("name"), inner.get("name", "status"), args
+
+    args = {o["name"]: o.get("value") for o in (first.get("options") or [])}
+    return None, first.get("name", "status"), args
 
 
-def _start():
-    desired, running = _counts()
+def _call(action, interaction, **extra):
+    """Invoke the controller and return its structured verdict."""
+    member = interaction.get("member") or {}
+    user_id = (member.get("user") or {}).get("id")
 
-    if desired > 0:
-        state = "already running" if running > 0 else "already starting"
-        return f"`{DOMAIN_NAME}` is {state}."
+    payload = {
+        "action": action,
+        "source": "discord",
+        "guild_id": interaction.get("guild_id"),
+        "user_id": user_id,
+        # Sent for the controller to CHECK, not as a claim of privilege. These
+        # come from the body Discord signed, so they are trustworthy input.
+        "member_role_ids": member.get("roles") or [],
+        "by": f"discord:{user_id}" if user_id else "discord",
+    }
+    payload.update(extra)
 
-    ecs.update_service(cluster=CLUSTER, service=SERVICE, desiredCount=1)
-    print(f"Started {SERVICE} (set desiredCount=1)")
-    return (
-        f"Starting `{DOMAIN_NAME}` :rocket:\n"
-        "The world takes a few minutes to load — you'll get a message here once "
-        "it's ready to join."
+    response = lambda_client.invoke(
+        FunctionName=CONTROLLER,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(payload).encode(),
     )
+    return json.loads(response["Payload"].read() or b"{}")
 
 
-def _status():
-    desired, running = _counts()
+def _gate_summary(gate):
+    if not gate:
+        return ""
 
-    if desired == 0:
-        return f"`{DOMAIN_NAME}` is asleep. Use `/minecraft start` to wake it."
-    if running == 0:
-        return f"`{DOMAIN_NAME}` is starting — the server task is still coming up."
-    return (
-        f"`{DOMAIN_NAME}` is up. If it won't accept connections yet, the world is "
-        "still loading."
-    )
+    mode = gate.get("mode", "enable")
+    if mode == "enable":
+        detail = "open to anyone who resolves the hostname"
+    elif mode == "disable":
+        detail = "closed — DNS lookups will not start it"
+    else:
+        detail = "following the schedule"
+        if not gate.get("allowed") and gate.get("next_open"):
+            detail += f", next open {gate['next_open'][:16].replace('T', ' ')}"
+        elif gate.get("allowed"):
+            detail += ", currently within hours"
+
+    if gate.get("override_until"):
+        detail += f" (override until {gate['override_until'][:16].replace('T', ' ')})"
+
+    return f"Gate: **{mode}** — {detail}."
+
+
+def _handle(interaction):
+    group, name, args = _subcommand(interaction)
+
+    if group == "gate":
+        if name in MODE_SUBCOMMANDS:
+            result = _call("set_mode", interaction, mode=name)
+        elif name in OVERRIDE_SUBCOMMANDS:
+            result = _call(
+                "override", interaction, state=name, minutes=args.get("minutes") or 0
+            )
+        else:
+            return _reply("Unknown gate subcommand.", ephemeral=True)
+
+        if result.get("error"):
+            return _reply(f":lock: {result['error']}.", ephemeral=True)
+        if result.get("cleared"):
+            return _reply(f"Override cleared. {_gate_summary(result.get('gate'))}")
+        return _reply(_gate_summary(result.get("gate")) or "Gate updated.")
+
+    if name == "start":
+        result = _call("start", interaction)
+        if result.get("error"):
+            return _reply(f":lock: {result['error']}.", ephemeral=True)
+        if result.get("started"):
+            return _reply(
+                f"Starting `{DOMAIN_NAME}` :rocket:\n"
+                "The world takes a few minutes to load — you'll get a message here "
+                "once it's ready to join."
+            )
+        state = "running" if result.get("running") else "starting"
+        return _reply(f"`{DOMAIN_NAME}` is already {state}.")
+
+    if name == "stop":
+        minutes = args.get("minutes") or 0
+        result = _call("stop", interaction, minutes=minutes)
+        if result.get("error"):
+            return _reply(f":lock: {result['error']}.", ephemeral=True)
+        if result.get("scheduled"):
+            return _reply(
+                f"`{DOMAIN_NAME}` will stop in {minutes} minutes. Players have been "
+                "warned."
+            )
+        if result.get("stopped"):
+            return _reply(f"`{DOMAIN_NAME}` is shutting down.")
+        return _reply(f"`{DOMAIN_NAME}` is already asleep.")
+
+    result = _call("status", interaction)
+    if result.get("error"):
+        return _reply(f":warning: {result['error']}.", ephemeral=True)
+
+    if result.get("desired", 0) == 0:
+        line = f"`{DOMAIN_NAME}` is asleep."
+    elif result.get("running", 0) == 0:
+        line = f"`{DOMAIN_NAME}` is starting — the task is still coming up."
+    else:
+        line = (
+            f"`{DOMAIN_NAME}` is up. If it won't accept connections yet, the world "
+            "is still loading."
+        )
+
+    pending = result.get("pending_stop")
+    if pending and pending.get("at"):
+        line += f"\nScheduled to stop at {pending['at'][:16].replace('T', ' ')}."
+
+    summary = _gate_summary(result.get("gate"))
+    return _reply(f"{line}\n{summary}" if summary else line)
 
 
 def handler(event, context):
@@ -219,9 +340,11 @@ def handler(event, context):
     if GUILD_ID and interaction.get("guild_id") != GUILD_ID:
         return _reply("This command isn't enabled here.", ephemeral=True)
 
-    options = (interaction.get("data") or {}).get("options") or []
-    subcommand = options[0]["name"] if options else "status"
-
-    if subcommand == "start":
-        return _reply(_start())
-    return _reply(_status())
+    try:
+        return _handle(interaction)
+    except Exception as exc:  # noqa: BLE001 - never leave Discord without a reply
+        print(f"controller call failed: {exc}")
+        return _reply(
+            ":warning: Couldn't reach the server controller. Try again in a moment.",
+            ephemeral=True,
+        )

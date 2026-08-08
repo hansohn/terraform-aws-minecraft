@@ -58,6 +58,15 @@ jobs:
             terraform init --backend=false
             terraform validate
 
+      # archive_file will happily zip a Python file with a syntax error, and the
+      # failure only surfaces at the next invocation. Byte-compiling is the one
+      # automated check that catches it before it ships.
+      - name: Compile Lambda sources
+        if: ${{ !startsWith(matrix.directory, './examples/') }}
+        run: |
+            cd ${{ matrix.directory }}
+            python3 -m compileall -q lambda/
+
       - name: Lint
         run: |
             tflint \

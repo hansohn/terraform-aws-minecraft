@@ -42,3 +42,9 @@ variable "discord_guild_id" {
   default     = ""
   description = "Optional Discord server (guild) ID to restrict the /minecraft slash command to."
 }
+
+variable "discord_privileged_role_id" {
+  type        = string
+  default     = ""
+  description = "Optional Discord role ID allowed to run start/stop and change the wake gate. Empty means any guild member may."
+}

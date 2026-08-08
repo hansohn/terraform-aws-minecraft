@@ -21,13 +21,18 @@
 
 This module runs a Minecraft server (Java or Bedrock) on **ECS Fargate that
 scales to zero** — you only pay for compute while someone is actually playing.
-When a
-player resolves the server's hostname, a Route53 DNS-query log triggers a Lambda
-that starts the task; a watchdog sidecar points DNS at the task on boot and
-shuts the server back down after a configurable idle period. When the task
-stops, a second Lambda parks the A record back on a placeholder so the hostname
-never resolves to a public IP AWS has recycled to another account. World data
-persists on EFS between sessions.
+When a player resolves the server's hostname, a Route53 DNS-query log triggers a
+relay Lambda, which asks the **controller** to start the task; a watchdog sidecar
+points DNS at the task on boot and shuts the server back down after a
+configurable idle period. When the task stops, a second Lambda parks the A record
+back on a placeholder so the hostname never resolves to a public IP AWS has
+recycled to another account. World data persists on EFS between sessions.
+
+The controller is the only role holding `ecs:UpdateService`, so every way in —
+DNS, Discord, schedules — passes through the same decision. By default it says
+yes to everything and the server behaves exactly as it always has; configure
+`wake_windows` and it will only say yes during the hours you choose. See
+"The wake gate".
 
 Because Route53 public-zone query logging must live in `us-east-1`, the module
 manages a dedicated `us-east-1` provider internally for that plumbing while the
@@ -120,9 +125,23 @@ module "minecraft" {
   # Add a /minecraft slash command that wakes the server (see below).
   # discord_application_public_key = "abc123..."
   # discord_guild_id               = "112233445566778899"
+  # discord_privileged_role_id     = "998877665544332211"
 
-  # Stop DNS queries from starting the server, so only the Discord command can
-  # (see "Turning off wake-on-DNS"). Needs the two inputs above.
+  # Only let DNS lookups wake the server during these hours (see "The wake
+  # gate"). Empty windows, the default, means no restriction.
+  # wake_default_mode = "schedule"
+  # wake_timezone     = "America/Los_Angeles"
+  # wake_windows = [
+  #   { days = ["mon", "tue", "wed", "thu"], start = "15:30", end = "20:30" },
+  #   { days = ["sat", "sun"],               start = "09:00", end = "22:00" },
+  # ]
+
+  # Also stop a server that's already running when its window closes, warning
+  # players in-game first (see "Curfews and stops").
+  # enable_curfew          = true
+  # curfew_warning_minutes = 10
+
+  # Remove the DNS wake path entirely, so only Discord can start the server.
   # enable_dns_wake = false
 
   # Deploy into an existing VPC instead of creating one. Subnets must be
@@ -232,8 +251,18 @@ to a placeholder until the task is up, so a first connection attempt just fails
 and there's no way to tell "starting" from "broken". Setting
 `discord_application_public_key` publishes a `/minecraft` command instead:
 
-* `/minecraft start` — wakes the server (idempotent) and confirms immediately.
-* `/minecraft status` — reports asleep / starting / up.
+| Command | Who | What |
+| --- | --- | --- |
+| `/minecraft status` | anyone | asleep / starting / up, plus the gate state |
+| `/minecraft start` | privileged | wakes the server (idempotent), bypassing the gate |
+| `/minecraft stop [minutes]` | privileged | stops now, or warns and stops later |
+| `/minecraft gate …` | privileged | see "The wake gate" below |
+
+"Privileged" means holding `discord_privileged_role_id`. Leave it empty and
+guild membership alone is enough, which is how the command behaved before
+0.8.0 — so upgrading doesn't lock anyone out. Gate operations are nested under
+a subcommand group deliberately: `block` means a great many things on a
+Minecraft server and none of them are this.
 
 Readiness still arrives through the existing `discord_webhook_url`
 notification, so set both to close the loop.
@@ -249,7 +278,17 @@ Three one-time manual steps, since Terraform can't create the Discord app:
      "https://discord.com/api/v10/applications/$APP_ID/commands" \
      -d '[{"name":"minecraft","description":"Control the Minecraft server","options":[
            {"type":1,"name":"start","description":"Wake the server"},
-           {"type":1,"name":"status","description":"Check whether the server is up"}]}]'
+           {"type":1,"name":"status","description":"Check whether the server is up"},
+           {"type":1,"name":"stop","description":"Stop the server","options":[
+             {"type":4,"name":"minutes","description":"Warn players, then stop after this many minutes","required":false}]},
+           {"type":2,"name":"gate","description":"Control when DNS lookups may wake the server","options":[
+             {"type":1,"name":"enable","description":"DNS lookups may start the server"},
+             {"type":1,"name":"disable","description":"DNS lookups may not start the server"},
+             {"type":1,"name":"schedule","description":"Follow the configured hours"},
+             {"type":1,"name":"allow","description":"Temporarily allow starts","options":[
+               {"type":4,"name":"minutes","description":"How long, in minutes","required":true}]},
+             {"type":1,"name":"block","description":"Temporarily refuse starts","options":[
+               {"type":4,"name":"minutes","description":"How long, in minutes","required":true}]}]}]}]'
    ```
 
 3. Paste the `discord_interactions_url` output into the portal as the
@@ -262,38 +301,85 @@ Requests without a valid signature over the timestamp and body get a 401, and
 timestamps older than five minutes are refused to close the replay window. Set
 `discord_guild_id` to additionally pin the command to one server.
 
-### Turning off wake-on-DNS
+### The wake gate
 
 Wake-on-DNS has no notion of *who* asked. The subscription filter uses an empty
-`filter_pattern`, so it matches every event in the query log, and `launcher.py`
-never reads the event it was handed — it just sets the desired count to 1. Any
-resolver reaching the zone starts the server: any record type, any name under
-the zone, including ones that don't exist.
+`filter_pattern`, so it matches every event in the query log, and the relay
+never reads the event it was handed. Any resolver reaching the zone asks for a
+start: any record type, any name under the zone, including ones that don't
+exist.
 
 In practice that means DNS scanners. A zone that only ever sees a handful of
-real queries a week will still get woken by automated probes — typically `SOA`
-and `A` lookups from datacenter IPs, with no `SRV` lookup, which is the tell
-that no Minecraft client was involved. Each one boots the server, holds it for
-`startup_minutes` waiting for a connection that never comes, and scales back to
-zero.
+real queries a week will still get probed — typically `SOA` and `A` lookups from
+datacenter IPs with no `SRV` lookup, which is the tell that no Minecraft client
+was involved. Filtering by record type does not help: a scanner's plain `A`
+lookup is indistinguishable from a player's.
 
-Set `enable_dns_wake = false` to remove the launcher Lambda and its subscription
-filter, and drive starts from the signature-verified Discord command instead:
+So the decision is made on *time and policy* instead, in one place. Every wake
+path — the DNS relay, the Discord command, the curfew schedules — invokes the
+**controller** Lambda, which is the only role in the module holding
+`ecs:UpdateService`. The others cannot reach ECS at all, so the gate is not an
+honour system a future edit can forget to consult.
+
+The gate has three modes, and governs **the DNS path only**:
+
+| Mode | Effect |
+| --- | --- |
+| `enable` | DNS lookups may start the server (the default; today's behaviour) |
+| `disable` | DNS lookups may not — a kill switch |
+| `schedule` | DNS lookups may, but only inside `wake_windows` |
+
+`/minecraft start` and `/minecraft stop` are privileged and **not** gated. That
+is what stops Discord being a way around the schedule: unprivileged users cannot
+start the server at all, so there is nothing to gate.
 
 ```hcl
-enable_dns_wake                = false
-discord_application_public_key = "..." # see "Discord slash command" above
-discord_guild_id               = "..." # pin it to your server
+wake_default_mode = "schedule"
+wake_timezone     = "America/Los_Angeles"
+wake_windows = [
+  { days = ["mon", "tue", "wed", "thu"], start = "15:30", end = "20:30" },
+  { days = ["fri"],                      start = "15:30", end = "22:00" },
+  { days = ["sat", "sun"],               start = "09:00", end = "22:00" },
+]
 ```
 
-DNS still carries players to the server — the watchdog rewrites the A record to
-the task's public IP on boot exactly as before. It simply stops being the
-*trigger*. The trade is that a player can no longer wake the server by trying to
-connect; someone has to run `/minecraft start` first.
+Windows are evaluated with Python's `zoneinfo`, so daylight saving is applied
+for you and the hours do not drift twice a year. A window whose `end` is earlier
+than its `start` wraps past midnight and belongs to its **start** day, so
+`{ days = ["fri"], start = "22:00", end = "02:00" }` runs into Saturday morning
+without needing a Saturday entry.
 
-Route53 query logging stays enabled either way. It costs almost nothing at these
-volumes and it is the only record of who is resolving the hostname, which is
-what makes an unexpected start attributable after the fact:
+**`wake_windows = []` means no restriction**, which is what keeps all of this
+opt-in — with the defaults, the module behaves exactly as it did before.
+
+Runtime changes go through Discord, and land in an SSM parameter rather than a
+`terraform apply`:
+
+```
+/minecraft gate schedule       follow the windows
+/minecraft gate disable        nothing may wake it
+/minecraft gate allow 60       one more hour, whatever the schedule says
+/minecraft gate block 30       no play for half an hour
+```
+
+`allow` and `block` expire on their own; `gate <mode>` persists until changed.
+None of this requires Discord, though — the parameter is just JSON, and the
+`gate_parameter_name` output tells you where it is:
+
+```sh
+aws ssm put-parameter --name "$(terraform output -raw gate_parameter_name)" \
+  --overwrite --value '{"version":1,"mode":"disable"}'
+```
+
+Failures fail **closed**: an unusable `wake_timezone` or an unreadable parameter
+denies the start and logs why, because failing open silently voids a curfew
+while failing closed is recoverable in one command.
+
+`enable_dns_wake = false` is the deploy-time counterpart — it removes the relay
+and subscription filter entirely, rather than shutting them at runtime. Use it
+for a Discord-only deployment. Route53 query logging stays on either way; it is
+the only record of who is resolving the hostname, and what makes an unexpected
+start attributable after the fact:
 
 ```sh
 aws logs filter-log-events --region us-east-1 \
@@ -303,8 +389,72 @@ aws logs filter-log-events --region us-east-1 \
 ```
 
 > :warning: With `enable_dns_wake = false` and no Discord public key, nothing
-> can start the server automatically — it has to be scaled up by hand with
-> `aws ecs update-service --cluster <name> --service <name> --desired-count 1`.
+> starts the server automatically. Invoke the controller directly — see the
+> `controller_function_name` output. The gate still applies to that path.
+
+### Curfews and stops
+
+The gate only refuses to *start*. A session already running when the window
+closes carries on until the players leave and `shutdown_minutes` expires. That
+is often enough — they simply can't get back in — but `enable_curfew` makes the
+boundary real:
+
+```hcl
+enable_curfew          = true
+curfew_warning_minutes = 10
+```
+
+Schedules are derived from `wake_windows`, so there is only ever one definition
+of "when are we open". At the warning mark players are told in-game and the
+notification goes out over SNS (so email, and Discord if `discord_webhook_url`
+is set); at the close the controller scales the service to zero.
+
+In-game warnings come from an **announcer sidecar** added to the task. In
+`awsvpc` mode every container shares one network namespace, so it reaches RCON
+on `localhost` — nothing is exposed to the VPC, there is no port to open and no
+VPC-attached Lambda. It carries its own copy of the window closes and needs no
+AWS credentials at all.
+
+It is off by default because it disconnects players mid-session. The itzg image
+handles `SIGTERM` and saves the world, so there is no data loss, but the exit is
+abrupt.
+
+Ad-hoc stops use the same machinery, for maintenance:
+
+```
+/minecraft stop 10     warn, then stop in ten minutes
+/minecraft stop        stop now
+```
+
+> :information_source: The sidecar only knows about *scheduled* closes, so an
+> ad-hoc `/minecraft stop 10` warns through Discord and email but not in-game.
+> If you want players warned in-game too, say so first over RCON — see
+> "Moderating players" below.
+
+### Moderating players
+
+This module deliberately has no player-moderation commands: banning, kicking and
+whitelisting all need RCON, and the Minecraft ecosystem already solves it better
+than a Lambda could. **DiscordSRV's console channel** gives you the lot from a
+phone with no AWS infrastructure — set `DiscordConsoleChannelId` to a private,
+admin-only channel and messages sent there run as console commands:
+
+```
+ban SomeKid griefing
+kick SomeKid
+whitelist add NewKid
+fwhitelist add BedrockKid     # Floodgate — Bedrock players are separate
+```
+
+Three things to know. It is **full console access**, not scoped to moderation,
+so that channel must be private (`DiscordConsoleChannelBlacklistedCommands`
+narrows it). The **bot token is a secret and must not go in `plugin_configs`** —
+those contents sit in the task definition in plaintext; seed everything else and
+set the token once by hand, where it persists on EFS. And Bedrock players joining
+through Geyser need Floodgate's own whitelist, separate from the vanilla one.
+
+Failing that, `enable_ecs_exec = true` gives you `rcon-cli` from a terminal
+without opening a port at all — see "Restricting who can join" above.
 
 ### Using with Terragrunt
 
@@ -338,13 +488,17 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_config_seed_image"></a> [config\_seed\_image](#input\_config\_seed\_image) | Container image for the init container that seeds plugin\_configs onto the EFS volume. Only used when plugin\_configs is non-empty; needs a shell and base64 (busybox suffices). | `string` | `"public.ecr.aws/docker/library/busybox:stable"` | no |
 | <a name="input_cpu_architecture"></a> [cpu\_architecture](#input\_cpu\_architecture) | Task CPU architecture. Fargate Spot only supports X86\_64; use ARM64 only with use\_spot = false. | `string` | `"X86_64"` | no |
 | <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create a dedicated VPC (with public subnets, IGW, and routing). Set false to deploy into an existing VPC via vpc\_id + subnet\_ids. | `bool` | `true` | no |
+| <a name="input_curfew_announcer_image"></a> [curfew\_announcer\_image](#input\_curfew\_announcer\_image) | Image for the announcer sidecar that issues in-game warnings over RCON on localhost. Empty uses the same image as the server, which already ships rcon-cli — so no extra pull and no image to build. Ignored unless enable\_curfew is true. | `string` | `""` | no |
+| <a name="input_curfew_warning_minutes"></a> [curfew\_warning\_minutes](#input\_curfew\_warning\_minutes) | How long before a curfew stop to start warning players, in-game via the announcer sidecar and in Discord via the SNS topic. Also the default lead time for an ad-hoc `/minecraft stop` with no argument-supplied delay. Ignored unless enable\_curfew is true. | `number` | `10` | no |
 | <a name="input_discord_application_public_key"></a> [discord\_application\_public\_key](#input\_discord\_application\_public\_key) | Discord application public key (Developer Portal > General Information). When set, a Lambda Function URL is published as the app's interactions endpoint, backing a /minecraft slash command that starts the server and reports status. Not a secret — it only verifies Discord's request signatures. | `string` | `""` | no |
 | <a name="input_discord_guild_id"></a> [discord\_guild\_id](#input\_discord\_guild\_id) | Restrict the /minecraft slash command to a single Discord server (guild) ID. Empty allows any guild the app is installed in. Ignored unless discord\_application\_public\_key is set. | `string` | `""` | no |
+| <a name="input_discord_privileged_role_id"></a> [discord\_privileged\_role\_id](#input\_discord\_privileged\_role\_id) | Discord role ID allowed to run the privileged /minecraft subcommands (start, stop, and the gate group). Empty keeps the pre-0.8.0 behaviour where guild membership alone is enough, so upgrading does not lock existing users out. Ignored unless discord\_application\_public\_key is set. | `string` | `""` | no |
 | <a name="input_discord_webhook_url"></a> [discord\_webhook\_url](#input\_discord\_webhook\_url) | Discord channel webhook URL. When set, a Lambda subscribes to the SNS topic and reposts server start/stop notifications to Discord. Pass via TF\_VAR\_discord\_webhook\_url; keep it out of version control. | `string` | `""` | no |
 | <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. "minecraft.hansohn.io"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name\_servers output. | `string` | n/a | yes |
 | <a name="input_efs_throughput_mode"></a> [efs\_throughput\_mode](#input\_efs\_throughput\_mode) | EFS throughput mode. Use "bursting" or "elastic"; avoid "provisioned" to keep costs down. | `string` | `"bursting"` | no |
 | <a name="input_enable_backups"></a> [enable\_backups](#input\_enable\_backups) | Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained). | `bool` | `false` | no |
-| <a name="input_enable_dns_wake"></a> [enable\_dns\_wake](#input\_enable\_dns\_wake) | Start the server whenever anyone resolves the hostname. Unauthenticated by design — the subscription filter matches every Route53 query log event and the launcher inspects none of it, so automated DNS scanners wake the server as readily as players do. Set to false to drop the launcher Lambda and its subscription filter, leaving the Discord /minecraft command (see discord\_application\_public\_key) as the wake path; with neither enabled the service starts only by hand via `aws ecs update-service --desired-count 1`. Route53 query logging stays on either way, so unexpected starts remain attributable. | `bool` | `true` | no |
+| <a name="input_enable_curfew"></a> [enable\_curfew](#input\_enable\_curfew) | Stop a RUNNING server when its wake\_window closes, rather than only refusing to start a new one. Off by default because it disconnects players mid-session — the itzg image handles SIGTERM and saves the world, so there is no data loss, but the exit is abrupt. Requires wake\_windows to be non-empty. Also adds the announcer sidecar so players get in-game warning first. | `bool` | `false` | no |
+| <a name="input_enable_dns_wake"></a> [enable\_dns\_wake](#input\_enable\_dns\_wake) | Build the DNS wake path: a Route53 query-log subscription filter and the relay Lambda that forwards to the controller. Waking on DNS is unauthenticated by construction — the filter matches every query log event and the relay inspects none of it, so automated scanners reach the controller as readily as players do (the gate is what decides whether they get a server). Set to false to drop that path entirely, leaving the Discord /minecraft command as the way in; with neither enabled the service starts only via the controller (see the controller\_function\_name output). Route53 query logging stays on either way, so unexpected starts remain attributable. | `bool` | `true` | no |
 | <a name="input_enable_ecs_exec"></a> [enable\_ecs\_exec](#input\_enable\_ecs\_exec) | Enable ECS Exec on the task so operators can open a shell (or run rcon-cli) inside the running container via `aws ecs execute-command`. Access is gated entirely by IAM over SSM Session Manager — no inbound port is opened. Grants the task role ssmmessages permissions. | `bool` | `false` | no |
 | <a name="input_enable_geyser"></a> [enable\_geyser](#input\_enable\_geyser) | On a java server, also open the Bedrock UDP port (bedrock\_port) for the Geyser plugin so Bedrock clients can join. For a native Bedrock server use server\_edition = "bedrock" instead. | `bool` | `false` | no |
 | <a name="input_java_memory"></a> [java\_memory](#input\_java\_memory) | Heap size passed to itzg/minecraft-server via MEMORY. Keep it below task\_memory to leave headroom for JVM metaspace/native memory and the watchdog sidecar. | `string` | `"10G"` | no |
@@ -365,16 +519,21 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_use_spot"></a> [use\_spot](#input\_use\_spot) | Run the task on Fargate Spot (much cheaper; rare interruptions just restart the server). Spot is x86 only. | `bool` | `true` | no |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | CIDR block for the VPC. Only used when create\_vpc = true. | `string` | `"10.100.0.0/24"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | Existing VPC to deploy into when create\_vpc = false. Ignored when create\_vpc = true. | `string` | `""` | no |
+| <a name="input_wake_default_mode"></a> [wake\_default\_mode](#input\_wake\_default\_mode) | Initial gate mode seeded into the SSM parameter: "enable" (DNS queries may start the task), "disable" (they may not), or "schedule" (they may, but only inside wake\_windows). NOTE: the parameter carries ignore\_changes on its value because Discord and the CLI mutate it, so this is a CREATE-TIME setting only — changing it later will not update an existing parameter. Use the /minecraft gate subcommands or `aws ssm put-parameter --overwrite` instead. | `string` | `"enable"` | no |
+| <a name="input_wake_timezone"></a> [wake\_timezone](#input\_wake\_timezone) | IANA timezone the wake\_windows are expressed in, e.g. "America/Los\_Angeles". Handled by Python's zoneinfo, so daylight saving transitions are applied automatically and windows do not drift. Only used when the gate mode is "schedule". | `string` | `"UTC"` | no |
+| <a name="input_wake_windows"></a> [wake\_windows](#input\_wake\_windows) | Hours during which DNS queries may start the task, in wake\_timezone, when the gate mode is "schedule". Days are mon..sun; start/end are zero-padded 24h "HH:MM". A window whose end is earlier than its start wraps past midnight and belongs to its START day. EMPTY MEANS NO RESTRICTION, which is what keeps this opt-in and leaves existing deployments unchanged. | <pre>list(object({<br/>    days  = list(string)<br/>    start = string<br/>    end   = string<br/>  }))</pre> | `[]` | no |
 | <a name="input_watchdog_image"></a> [watchdog\_image](#input\_watchdog\_image) | Watchdog sidecar image that points DNS at the task on boot and scales the service to zero when idle. | `string` | `"doctorray/minecraft-ecsfargate-watchdog:latest"` | no |
 
 ## Outputs
 
 | Name | Description |
 | ---- | ----------- |
+| <a name="output_controller_function_name"></a> [controller\_function\_name](#output\_controller\_function\_name) | Lambda that owns starting and stopping the service — the only role holding ecs:UpdateService. Start the server without Discord or a DNS query: aws lambda invoke --function-name <this> --payload '{"action":"start","source":"cli"}' /dev/stdout. The gate still applies to this path, so a start while the mode is "disable" is refused; change the gate first via gate\_parameter\_name. |
 | <a name="output_discord_interactions_url"></a> [discord\_interactions\_url](#output\_discord\_interactions\_url) | Lambda Function URL to paste into the Discord Developer Portal as the app's Interactions Endpoint URL. Empty unless discord\_application\_public\_key is set. |
 | <a name="output_ecs_cluster_name"></a> [ecs\_cluster\_name](#output\_ecs\_cluster\_name) | ECS cluster name. |
 | <a name="output_ecs_service_name"></a> [ecs\_service\_name](#output\_ecs\_service\_name) | ECS service name. |
 | <a name="output_efs_id"></a> [efs\_id](#output\_efs\_id) | EFS file system ID holding the world data. |
+| <a name="output_gate_parameter_name"></a> [gate\_parameter\_name](#output\_gate\_parameter\_name) | SSM parameter holding the runtime wake-gate state. Change the mode without Discord: aws ssm put-parameter --name <this> --overwrite --value '{"version":1,"mode":"disable"}'. |
 | <a name="output_hosted_zone_id"></a> [hosted\_zone\_id](#output\_hosted\_zone\_id) | Route53 hosted zone ID. |
 | <a name="output_name_servers"></a> [name\_servers](#output\_name\_servers) | Route53 name servers for the delegated zone. Create NS records for this subdomain at your parent-domain DNS provider (Cloudflare), DNS-only / unproxied. |
 | <a name="output_server_address"></a> [server\_address](#output\_server\_address) | Hostname players connect to. |
