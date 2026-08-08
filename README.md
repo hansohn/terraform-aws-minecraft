@@ -1,19 +1,13 @@
 <div align="center">
-  <h3>terraform-aws-minecraft</h3>
+  <h1>terraform-aws-minecraft</h1>
   <p>On-demand, scale-to-zero Minecraft server on AWS Fargate</p>
   <p>
     <!-- Build Status -->
-    <a href="https://actions-badge.atrox.dev/hansohn/terraform-aws-minecraft/goto?ref=main">
-      <img src="https://img.shields.io/endpoint.svg?url=https%3A%2F%2Factions-badge.atrox.dev%2Fhansohn%2Fterraform-aws-minecraft%2Fbadge%3Fref%3Dmain&style=for-the-badge">
-    </a>
+    <a href="https://actions-badge.atrox.dev/hansohn/terraform-aws-minecraft/goto?ref=main"><img src="https://img.shields.io/endpoint.svg?url=https%3A%2F%2Factions-badge.atrox.dev%2Fhansohn%2Fterraform-aws-minecraft%2Fbadge%3Fref%3Dmain&style=for-the-badge"></a>
     <!-- Github Tag -->
-    <a href="https://gitHub.com/hansohn/terraform-aws-minecraft/tags/">
-      <img src="https://img.shields.io/github/tag/hansohn/terraform-aws-minecraft.svg?style=for-the-badge">
-    </a>
+    <a href="https://gitHub.com/hansohn/terraform-aws-minecraft/tags/"><img src="https://img.shields.io/github/tag/hansohn/terraform-aws-minecraft.svg?style=for-the-badge"></a>
     <!-- License -->
-    <a href="https://github.com/hansohn/terraform-aws-minecraft/blob/main/LICENSE">
-      <img src="https://img.shields.io/github/license/hansohn/terraform-aws-minecraft.svg?style=for-the-badge">
-    </a>
+    <a href="https://github.com/hansohn/terraform-aws-minecraft/blob/main/LICENSE"><img src="https://img.shields.io/github/license/hansohn/terraform-aws-minecraft.svg?style=for-the-badge"></a>
   </p>
 </div>
 
@@ -163,7 +157,7 @@ inside it. Keep the heap well under the task memory — the JVM needs metaspace
 and native memory on top, and the watchdog sidecar shares the task.
 
 | Server | `task_cpu` | `task_memory` | `java_memory` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Vanilla / Paper, few players | 2048 | 4096 | `3G` |
 | Paper + plugin stack (Geyser, ViaVersion, voice chat) | 2048 | 8192 | `6G` |
 | Modded (Forge/Fabric modpack) | 2048 | 16384 | `10G` |
