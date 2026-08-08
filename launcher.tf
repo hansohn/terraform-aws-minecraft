@@ -23,6 +23,43 @@ locals {
   dns_wake_enabled = var.enable_dns_wake
 }
 
+# Adding count to these turns "aws_lambda_function.launcher" into
+# "...launcher[0]", which Terraform reads as a different resource — so upgrading
+# from <= 0.7.0 would destroy and recreate all six, taking the launcher's
+# CloudWatch log history with them. These keep the existing objects.
+#
+# With enable_dns_wake = false the move still happens and the resource is then
+# destroyed, which is the intent.
+moved {
+  from = aws_lambda_function.launcher
+  to   = aws_lambda_function.launcher[0]
+}
+
+moved {
+  from = aws_cloudwatch_log_group.launcher
+  to   = aws_cloudwatch_log_group.launcher[0]
+}
+
+moved {
+  from = aws_lambda_permission.querylog
+  to   = aws_lambda_permission.querylog[0]
+}
+
+moved {
+  from = aws_cloudwatch_log_subscription_filter.querylog
+  to   = aws_cloudwatch_log_subscription_filter.querylog[0]
+}
+
+moved {
+  from = aws_iam_role.launcher
+  to   = aws_iam_role.launcher[0]
+}
+
+moved {
+  from = aws_iam_role_policy.launcher
+  to   = aws_iam_role_policy.launcher[0]
+}
+
 data "archive_file" "launcher" {
   count       = local.dns_wake_enabled ? 1 : 0
   type        = "zip"
