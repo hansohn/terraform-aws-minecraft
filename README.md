@@ -268,21 +268,56 @@ Three one-time manual steps, since Terraform can't create the Discord app:
 2. Register the command, using the application ID and a bot token from the same app:
 
    ```sh
-   curl -X PUT -H "Authorization: Bot $BOT_TOKEN" -H "Content-Type: application/json" \
+   curl -X PUT \
+     -H "Authorization: Bot $BOT_TOKEN" \
+     -H "Content-Type: application/json" \
      "https://discord.com/api/v10/applications/$APP_ID/commands" \
-     -d '[{"name":"minecraft","description":"Control the Minecraft server","options":[
-           {"type":1,"name":"start","description":"Wake the server"},
-           {"type":1,"name":"status","description":"Check whether the server is up"},
-           {"type":1,"name":"stop","description":"Stop the server","options":[
-             {"type":4,"name":"minutes","description":"Warn players, then stop after this many minutes","required":false}]},
-           {"type":2,"name":"gate","description":"Control when DNS lookups may wake the server","options":[
-             {"type":1,"name":"enable","description":"DNS lookups may start the server"},
-             {"type":1,"name":"disable","description":"DNS lookups may not start the server"},
-             {"type":1,"name":"schedule","description":"Follow the configured hours"},
-             {"type":1,"name":"allow","description":"Temporarily allow starts","options":[
-               {"type":4,"name":"minutes","description":"How long, in minutes","required":true}]},
-             {"type":1,"name":"block","description":"Temporarily refuse starts","options":[
-               {"type":4,"name":"minutes","description":"How long, in minutes","required":true}]}]}]}]'
+     -d @- <<'JSON'
+   [
+     {
+       "name": "minecraft",
+       "description": "Control the Minecraft server",
+       "options": [
+         { "type": 1, "name": "start",  "description": "Wake the server" },
+         { "type": 1, "name": "status", "description": "Check whether the server is up" },
+         {
+           "type": 1,
+           "name": "stop",
+           "description": "Stop the server",
+           "options": [
+             { "type": 4, "name": "minutes", "description": "Warn players, then stop after this many minutes", "required": false }
+           ]
+         },
+         {
+           "type": 2,
+           "name": "gate",
+           "description": "Control when DNS lookups may wake the server",
+           "options": [
+             { "type": 1, "name": "enable",   "description": "DNS lookups may start the server" },
+             { "type": 1, "name": "disable",  "description": "DNS lookups may not start the server" },
+             { "type": 1, "name": "schedule", "description": "Follow the configured hours" },
+             {
+               "type": 1,
+               "name": "allow",
+               "description": "Temporarily allow starts",
+               "options": [
+                 { "type": 4, "name": "minutes", "description": "How long, in minutes", "required": true }
+               ]
+             },
+             {
+               "type": 1,
+               "name": "block",
+               "description": "Temporarily refuse starts",
+               "options": [
+                 { "type": 4, "name": "minutes", "description": "How long, in minutes", "required": true }
+               ]
+             }
+           ]
+         }
+       ]
+     }
+   ]
+   JSON
    ```
 
 3. Paste the `discord_interactions_url` output into the portal as the
