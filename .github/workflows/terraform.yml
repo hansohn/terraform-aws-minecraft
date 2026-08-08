@@ -58,15 +58,6 @@ jobs:
             terraform init --backend=false
             terraform validate
 
-      # archive_file will happily zip a Python file with a syntax error, and the
-      # failure only surfaces at the next invocation. Byte-compiling is the one
-      # automated check that catches it before it ships.
-      - name: Compile Lambda sources
-        if: ${{ !startsWith(matrix.directory, './examples/') }}
-        run: |
-            cd ${{ matrix.directory }}
-            python3 -m compileall -q lambda/
-
       - name: Lint
         run: |
             tflint \
@@ -94,10 +85,24 @@ jobs:
               markdown table \
               ${{ matrix.directory }}
 
+  # archive_file will happily zip a Python file with a syntax error, and the
+  # failure only surfaces at the next Lambda invocation. Byte-compiling is the
+  # one automated check that catches it before it ships. Runs outside the
+  # terraform container, which carries no Python.
+  compile:
+    name: Compile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Compile Lambda sources
+        run: python3 -m compileall -q lambda/
+
   slack:
     name: Slack
     runs-on: ubuntu-latest
-    needs: [ locate, validate ]
+    needs: [ locate, validate, compile ]
     if: always()
     steps:
       - name: Checkout
