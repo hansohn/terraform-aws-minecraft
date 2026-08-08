@@ -121,6 +121,10 @@ module "minecraft" {
   # discord_application_public_key = "abc123..."
   # discord_guild_id               = "112233445566778899"
 
+  # Stop DNS queries from starting the server, so only the Discord command can
+  # (see "Turning off wake-on-DNS"). Needs the two inputs above.
+  # enable_dns_wake = false
+
   # Deploy into an existing VPC instead of creating one. Subnets must be
   # PUBLIC (route to an IGW) and in distinct AZs.
   # create_vpc = false
@@ -258,6 +262,50 @@ Requests without a valid signature over the timestamp and body get a 401, and
 timestamps older than five minutes are refused to close the replay window. Set
 `discord_guild_id` to additionally pin the command to one server.
 
+### Turning off wake-on-DNS
+
+Wake-on-DNS has no notion of *who* asked. The subscription filter uses an empty
+`filter_pattern`, so it matches every event in the query log, and `launcher.py`
+never reads the event it was handed — it just sets the desired count to 1. Any
+resolver reaching the zone starts the server: any record type, any name under
+the zone, including ones that don't exist.
+
+In practice that means DNS scanners. A zone that only ever sees a handful of
+real queries a week will still get woken by automated probes — typically `SOA`
+and `A` lookups from datacenter IPs, with no `SRV` lookup, which is the tell
+that no Minecraft client was involved. Each one boots the server, holds it for
+`startup_minutes` waiting for a connection that never comes, and scales back to
+zero.
+
+Set `enable_dns_wake = false` to remove the launcher Lambda and its subscription
+filter, and drive starts from the signature-verified Discord command instead:
+
+```hcl
+enable_dns_wake                = false
+discord_application_public_key = "..." # see "Discord slash command" above
+discord_guild_id               = "..." # pin it to your server
+```
+
+DNS still carries players to the server — the watchdog rewrites the A record to
+the task's public IP on boot exactly as before. It simply stops being the
+*trigger*. The trade is that a player can no longer wake the server by trying to
+connect; someone has to run `/minecraft start` first.
+
+Route53 query logging stays enabled either way. It costs almost nothing at these
+volumes and it is the only record of who is resolving the hostname, which is
+what makes an unexpected start attributable after the fact:
+
+```sh
+aws logs filter-log-events --region us-east-1 \
+  --log-group-name "/aws/route53/$DOMAIN_NAME" \
+  --start-time $(( ($(date +%s) - 86400) * 1000 )) \
+  --query 'events[].message' --output text
+```
+
+> :warning: With `enable_dns_wake = false` and no Discord public key, nothing
+> can start the server automatically — it has to be scaled up by hand with
+> `aws ecs update-service --cluster <name> --service <name> --desired-count 1`.
+
 ### Using with Terragrunt
 
 Pin an **exact** module version. Terragrunt's `tfr://` getter passes the
@@ -296,6 +344,7 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="input_domain_name"></a> [domain\_name](#input\_domain\_name) | Fully-qualified server hostname, also created as a Route53 public hosted zone (e.g. "minecraft.hansohn.io"). The parent domain's DNS provider (Cloudflare) must delegate this subdomain to the zone's name servers — see the name\_servers output. | `string` | n/a | yes |
 | <a name="input_efs_throughput_mode"></a> [efs\_throughput\_mode](#input\_efs\_throughput\_mode) | EFS throughput mode. Use "bursting" or "elastic"; avoid "provisioned" to keep costs down. | `string` | `"bursting"` | no |
 | <a name="input_enable_backups"></a> [enable\_backups](#input\_enable\_backups) | Create an AWS Backup plan + vault that takes point-in-time backups of the EFS world data. EFS itself has no restore points; enabling this guards against corruption, griefing, or accidental deletion (billed per GB retained). | `bool` | `false` | no |
+| <a name="input_enable_dns_wake"></a> [enable\_dns\_wake](#input\_enable\_dns\_wake) | Start the server whenever anyone resolves the hostname. Unauthenticated by design — the subscription filter matches every Route53 query log event and the launcher inspects none of it, so automated DNS scanners wake the server as readily as players do. Set to false to drop the launcher Lambda and its subscription filter, leaving the Discord /minecraft command (see discord\_application\_public\_key) as the wake path; with neither enabled the service starts only by hand via `aws ecs update-service --desired-count 1`. Route53 query logging stays on either way, so unexpected starts remain attributable. | `bool` | `true` | no |
 | <a name="input_enable_ecs_exec"></a> [enable\_ecs\_exec](#input\_enable\_ecs\_exec) | Enable ECS Exec on the task so operators can open a shell (or run rcon-cli) inside the running container via `aws ecs execute-command`. Access is gated entirely by IAM over SSM Session Manager — no inbound port is opened. Grants the task role ssmmessages permissions. | `bool` | `false` | no |
 | <a name="input_enable_geyser"></a> [enable\_geyser](#input\_enable\_geyser) | On a java server, also open the Bedrock UDP port (bedrock\_port) for the Geyser plugin so Bedrock clients can join. For a native Bedrock server use server\_edition = "bedrock" instead. | `bool` | `false` | no |
 | <a name="input_java_memory"></a> [java\_memory](#input\_java\_memory) | Heap size passed to itzg/minecraft-server via MEMORY. Keep it below task\_memory to leave headroom for JVM metaspace/native memory and the watchdog sidecar. | `string` | `"10G"` | no |

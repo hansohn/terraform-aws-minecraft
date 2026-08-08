@@ -239,6 +239,12 @@ variable "discord_guild_id" {
 # Access and logging
 ################################################################################
 
+variable "enable_dns_wake" {
+  type        = bool
+  default     = true
+  description = "Start the server whenever anyone resolves the hostname. Unauthenticated by design — the subscription filter matches every Route53 query log event and the launcher inspects none of it, so automated DNS scanners wake the server as readily as players do. Set to false to drop the launcher Lambda and its subscription filter, leaving the Discord /minecraft command (see discord_application_public_key) as the wake path; with neither enabled the service starts only by hand via `aws ecs update-service --desired-count 1`. Route53 query logging stays on either way, so unexpected starts remain attributable."
+}
+
 variable "enable_ecs_exec" {
   type        = bool
   default     = false
