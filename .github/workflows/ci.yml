@@ -100,10 +100,48 @@ jobs:
         with:
           persist-credentials: false
 
+      # The container has no make, so these steps mirror the lint/terraform
+      # target in the Makefile, which runs the same checks locally.
+      - name: Terraform Format
+        working-directory: ${{ matrix.directory }}
+        run: terraform fmt -check
+
+      - name: Validate
+        working-directory: ${{ matrix.directory }}
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
       - name: Lint
-        run: make lint/terraform TF_DIRS="${TF_DIR}"
         env:
           TF_DIR: ${{ matrix.directory }}
+        run: |
+          tflint \
+            --chdir="${TF_DIR}" \
+            --only=terraform_comment_syntax \
+            --only=terraform_deprecated_index \
+            --only=terraform_deprecated_interpolation \
+            --only=terraform_documented_outputs \
+            --only=terraform_documented_variables \
+            --only=terraform_module_pinned_source \
+            --only=terraform_naming_convention \
+            --only=terraform_required_providers \
+            --only=terraform_required_version \
+            --only=terraform_typed_variables \
+            --only=terraform_workspace_remote
+
+      - name: Terraform Docs
+        if: ${{ !startsWith(matrix.directory, './examples/') }}
+        env:
+          TF_DIR: ${{ matrix.directory }}
+        run: |
+          terraform-docs \
+            --lockfile=false \
+            --output-check=true \
+            --output-file README.md \
+            --output-mode inject \
+            markdown table \
+            "${TF_DIR}"
 
   slack:
     name: Slack
