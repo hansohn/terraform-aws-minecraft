@@ -80,7 +80,7 @@ resource "aws_lambda_function" "launcher" {
   provider         = aws.us_east_1
   function_name    = "${local.name}-launcher"
   role             = aws_iam_role.launcher[0].arn
-  runtime          = "python3.12"
+  runtime          = "python3.14"
   handler          = "launcher.handler"
   filename         = data.archive_file.launcher[0].output_path
   source_code_hash = data.archive_file.launcher[0].output_base64sha256

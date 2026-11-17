@@ -57,7 +57,7 @@ resource "aws_iam_role_policy" "dns_reset" {
 resource "aws_lambda_function" "dns_reset" {
   function_name    = "${local.name}-dns-reset"
   role             = aws_iam_role.dns_reset.arn
-  runtime          = "python3.12"
+  runtime          = "python3.14"
   handler          = "dns_reset.handler"
   filename         = data.archive_file.dns_reset.output_path
   source_code_hash = data.archive_file.dns_reset.output_base64sha256

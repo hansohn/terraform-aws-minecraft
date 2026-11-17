@@ -48,7 +48,7 @@ resource "aws_cloudwatch_log_group" "controller" {
 resource "aws_lambda_function" "controller" {
   function_name    = local.controller_name
   role             = aws_iam_role.controller.arn
-  runtime          = "python3.12"
+  runtime          = "python3.14"
   handler          = "controller.handler"
   filename         = data.archive_file.controller.output_path
   source_code_hash = data.archive_file.controller.output_base64sha256
