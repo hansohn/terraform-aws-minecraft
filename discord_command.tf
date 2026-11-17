@@ -52,7 +52,7 @@ resource "aws_lambda_function" "discord_command" {
   count            = local.discord_command_enabled ? 1 : 0
   function_name    = "${local.name}-discord-command"
   role             = aws_iam_role.discord_command[0].arn
-  runtime          = "python3.12"
+  runtime          = "python3.14"
   handler          = "discord_command.handler"
   filename         = data.archive_file.discord_command[0].output_path
   source_code_hash = data.archive_file.discord_command[0].output_base64sha256

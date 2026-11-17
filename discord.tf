@@ -53,7 +53,7 @@ resource "aws_lambda_function" "discord" {
   count            = local.discord_webhook_enabled ? 1 : 0
   function_name    = "${local.name}-discord"
   role             = aws_iam_role.discord[0].arn
-  runtime          = "python3.12"
+  runtime          = "python3.14"
   handler          = "discord.handler"
   filename         = data.archive_file.discord[0].output_path
   source_code_hash = data.archive_file.discord[0].output_base64sha256
