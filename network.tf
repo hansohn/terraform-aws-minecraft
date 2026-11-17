@@ -6,6 +6,22 @@
 # server itself).
 ################################################################################
 
+locals {
+  # Two AZs for EFS mount-target redundancy; the task itself runs in one.
+  azs = slice(data.aws_availability_zones.available.names, 0, 2)
+
+  # Cartesian product of additional_ports x allowed_cidrs, keyed stably so the
+  # security-group for_each stays deterministic across plans.
+  additional_port_rules = {
+    for pair in setproduct(var.additional_ports, var.allowed_cidrs) :
+    "${pair[0].protocol}-${pair[0].port}-${pair[1]}" => {
+      port     = pair[0].port
+      protocol = pair[0].protocol
+      cidr     = pair[1]
+    }
+  }
+}
+
 # VPC/subnets/routing are created only when create_vpc = true. Otherwise the
 # task and EFS attach to caller-supplied vpc_id / subnet_ids (see locals).
 resource "aws_vpc" "this" {
