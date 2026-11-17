@@ -102,7 +102,7 @@ variable "server_edition" {
 variable "minecraft_image" {
   type        = string
   default     = ""
-  description = "Minecraft server container image. Empty selects the edition default: itzg/minecraft-server for java, itzg/minecraft-bedrock-server for bedrock."
+  description = "Minecraft server container image. Empty selects the edition default: itzg/minecraft-server for java, itzg/minecraft-bedrock-server for bedrock. The default tag is latest, so each task start can pull a newer image. Set a tag or digest to pin the version."
 }
 
 variable "minecraft_port" {
