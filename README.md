@@ -2,16 +2,43 @@
   <h1>terraform-aws-minecraft</h1>
   <p>On-demand, scale-to-zero Minecraft server on AWS Fargate</p>
   <p>
-    <!-- Build Status -->
-    <a href="https://actions-badge.atrox.dev/hansohn/terraform-aws-minecraft/goto?ref=main"><img src="https://img.shields.io/endpoint.svg?url=https%3A%2F%2Factions-badge.atrox.dev%2Fhansohn%2Fterraform-aws-minecraft%2Fbadge%3Fref%3Dmain&style=for-the-badge"></a>
-    <!-- Github Tag -->
-    <a href="https://gitHub.com/hansohn/terraform-aws-minecraft/tags/"><img src="https://img.shields.io/github/tag/hansohn/terraform-aws-minecraft.svg?style=for-the-badge"></a>
+    <!-- CI -->
+    <a href="https://github.com/hansohn/terraform-aws-minecraft/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/hansohn/terraform-aws-minecraft/ci.yml?branch=main&label=CI&style=for-the-badge"></a>
+    <!-- Tag -->
+    <a href="https://github.com/hansohn/terraform-aws-minecraft/tags"><img alt="Tag" src="https://img.shields.io/github/v/tag/hansohn/terraform-aws-minecraft?sort=semver&style=for-the-badge"></a>
     <!-- License -->
-    <a href="https://github.com/hansohn/terraform-aws-minecraft/blob/main/LICENSE"><img src="https://img.shields.io/github/license/hansohn/terraform-aws-minecraft.svg?style=for-the-badge"></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/hansohn/terraform-aws-minecraft?style=for-the-badge"></a>
+  </p>
+  <p>
+    <a href="#usage">Usage</a> •
+    <a href="#examples">Examples</a> •
+    <a href="#development">Development</a> •
+    <a href="#contributing">Contributing</a>
   </p>
 </div>
 
-## :open_book: Usage
+## Overview
+
+A Terraform module that runs a Minecraft server (Java or Bedrock) on ECS
+Fargate and scales it to zero, so you only pay for compute while someone is
+playing. A player resolving the server's hostname starts it; an idle watchdog
+stops it.
+
+## Highlights
+
+- **Scale to zero** // Fargate (or Spot) task runs only while players are connected; world data persists on EFS
+- **DNS-triggered wake** // A Route53 query log starts the server when a player looks up its hostname
+- **Wake gate** // One controller decides every start, and `wake_windows` limit when the server may wake
+- **Discord control** // Optional slash command to start, stop and gate the server
+- **Safe DNS** // The A record is parked on a placeholder when the task stops, so it never points at a recycled IP
+
+## Prerequisites
+
+- Terraform >= 1.2.0 and the AWS provider >= 6.0
+- An AWS account and credentials that can create ECS, EFS, Route53, Lambda and IAM resources
+- A parent domain whose DNS you control, to delegate the server's subdomain to Route53
+
+## Usage
 
 This module runs a Minecraft server (Java or Bedrock) on **ECS Fargate that
 scales to zero** — you only pay for compute while someone is actually playing.
@@ -510,7 +537,7 @@ terraform {
 }
 ```
 
-## :sparkles: Examples
+## Examples
 
 Please see the sample set of examples below for a better understanding of implementation
 
@@ -582,5 +609,33 @@ Please see the sample set of examples below for a better understanding of implem
 | <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | VPC ID hosting the server (created or caller-supplied). |
 <!-- END_TF_DOCS -->
 
-<!-- MARKDOWN LINKS & IMAGES -->
-<!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
+## Development
+
+```bash
+make help    # list targets
+make lint    # yamllint, actionlint, zizmor, Lambda compile, terraform fmt/validate/tflint/terraform-docs
+make test    # run tests
+make dev     # shell in the hansohn/terraform-aws container
+```
+
+> [!TIP]
+> Add a `## Help text` comment above a target to list it in `make help`.
+
+## Security
+
+To report a vulnerability, see the [Security Policy](https://github.com/hansohn/.github/blob/HEAD/SECURITY.md).
+Do not open a public issue.
+
+## Contributing
+
+Contributions are welcome. See the [Contributing Guide](https://github.com/hansohn/.github/blob/HEAD/CONTRIBUTING.md)
+for the full workflow.
+
+- Report bugs via [Bug Reports](https://github.com/hansohn/terraform-aws-minecraft/issues/new?template=bug-report.yml)
+- Request features via [Feature Requests](https://github.com/hansohn/terraform-aws-minecraft/issues/new?template=feature-request.yml)
+- Ask for help via [Support Requests](https://github.com/hansohn/terraform-aws-minecraft/issues/new?template=support-request.yml)
+- Follow the [Code of Conduct](https://github.com/hansohn/.github/blob/HEAD/CODE_OF_CONDUCT.md)
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).

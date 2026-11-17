@@ -1,0 +1,163 @@
+---
+name: ci
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v?[0-9]+.[0-9]+.[0-9]+'
+  schedule:
+    - cron: '0 7 * * 1,3,5'
+  workflow_dispatch:
+
+# Cancel superseded runs on branches. Runs on main finish, so the cron and
+# manual runs never cancel a push run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  # renovate: datasource=pypi depName=yamllint
+  YAMLLINT_VERSION: '1.38.0'
+  # renovate: datasource=github-releases depName=rhysd/actionlint extractVersion=^v(?<version>.*)$
+  ACTIONLINT_VERSION: '1.7.12'
+  # renovate: datasource=pypi depName=zizmor
+  ZIZMOR_VERSION: '1.31.1'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install linters
+        run: |
+          # The runner image ships its own yamllint, so install the pinned
+          # version into a separate pipx home and put it first on PATH.
+          bin_dir="${RUNNER_TEMP}/bin"
+          PIPX_HOME="${RUNNER_TEMP}/pipx" PIPX_BIN_DIR="${bin_dir}" \
+            pipx install "yamllint==${YAMLLINT_VERSION}"
+          PIPX_HOME="${RUNNER_TEMP}/pipx" PIPX_BIN_DIR="${bin_dir}" \
+            pipx install "zizmor==${ZIZMOR_VERSION}"
+          script_url="https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+          bash <(curl -fsSL "${script_url}") "${ACTIONLINT_VERSION}" "${bin_dir}"
+          echo "${bin_dir}" >> "$GITHUB_PATH"
+
+      - name: Lint
+        # Terraform is linted by the terraform job, which runs in the
+        # terraform container.
+        run: make lint/yaml lint/actions lint/python
+        env:
+          # zizmor runs its online audits (known-vulnerable-actions,
+          # impostor-commit) only when a token is set.
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Test
+        run: make test
+
+  locate:
+    name: Locate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      directories: ${{ steps.matrix.outputs.directories }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build Matrix
+        id: matrix
+        run: |
+          dirs=$(find . -name versions.tf -not -path '*/.terraform/*' | sort \
+            | jq -R -s -c 'split("\n") | map(select(length > 0) | sub("/versions.tf$"; ""))')
+          echo "directories=${dirs}" >> "$GITHUB_OUTPUT"
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: hansohn/terraform-aws:latest@sha256:920ba06999e772d4ca9e384e698ed7e1ddce3f9a47a8380bf294d750848f2e28
+    needs: [locate]
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJson(needs.locate.outputs.directories) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The container has no make, so these steps mirror the lint/terraform
+      # target in the Makefile, which runs the same checks locally.
+      - name: Terraform Format
+        working-directory: ${{ matrix.directory }}
+        run: terraform fmt -check
+
+      - name: Validate
+        working-directory: ${{ matrix.directory }}
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: Lint
+        env:
+          TF_DIR: ${{ matrix.directory }}
+        run: |
+          tflint \
+            --chdir="${TF_DIR}" \
+            --only=terraform_comment_syntax \
+            --only=terraform_deprecated_index \
+            --only=terraform_deprecated_interpolation \
+            --only=terraform_documented_outputs \
+            --only=terraform_documented_variables \
+            --only=terraform_module_pinned_source \
+            --only=terraform_naming_convention \
+            --only=terraform_required_providers \
+            --only=terraform_required_version \
+            --only=terraform_typed_variables \
+            --only=terraform_workspace_remote
+
+      - name: Terraform Docs
+        if: ${{ !startsWith(matrix.directory, './examples/') }}
+        env:
+          TF_DIR: ${{ matrix.directory }}
+        run: |
+          terraform-docs \
+            --lockfile=false \
+            --output-check=true \
+            --output-file README.md \
+            --output-mode inject \
+            markdown table \
+            "${TF_DIR}"
+
+  slack:
+    name: Slack
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [lint, locate, terraform]
+    if: always()
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Slack Notification
+        uses: Gamesight/slack-workflow-status@2e709ce51fd47f02b7221db8547e6e6f49f81f1d  # v2.0.0
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          channel: ${{ secrets.SLACK_CHANNEL_ID }}
+          name: ${{ secrets.SLACK_USERNAME }}
+          icon_url: "https://cdn-icons-png.flaticon.com/512/25/25231.png"

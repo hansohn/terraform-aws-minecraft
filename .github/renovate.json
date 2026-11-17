@@ -2,19 +2,36 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended",
-    ":preserveSemverRanges"
+    ":semanticCommits",
+    ":preserveSemverRanges",
+    "helpers:pinGitHubActionDigests",
+    "schedule:weekly"
   ],
+  "description": "Renovate manages Terraform providers and modules, GitHub Actions, and the pinned tool versions declared in workflow env blocks.",
   "labels": [
     "auto-update"
   ],
   "enabledManagers": [
     "terraform",
-    "github-actions"
+    "github-actions",
+    "custom.regex"
   ],
   "terraform": {
     "ignorePaths": [
       "**/context.tf",
       "examples/**"
     ]
-  }
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Bump pinned tool versions declared in workflow env blocks",
+      "managerFilePatterns": [
+        "/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s+\\w+_VERSION: '(?<currentValue>[^']+)'"
+      ]
+    }
+  ]
 }
