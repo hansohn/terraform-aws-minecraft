@@ -15,9 +15,6 @@ locals {
   # passed to the us-east-1 launcher Lambda so it targets the right region.
   region = data.aws_region.current.region
 
-  # Two AZs for EFS mount-target redundancy; the task itself runs in one.
-  azs = slice(data.aws_availability_zones.available.names, 0, 2)
-
   # Value the A record holds while the server is down (see lambda/dns_reset.py).
   dns_placeholder_ip = "127.0.0.1"
   dns_record_ttl     = 30
@@ -31,48 +28,6 @@ locals {
   is_bedrock    = var.server_edition == "bedrock"
   game_protocol = local.is_bedrock ? "udp" : "tcp"
   game_port     = local.is_bedrock ? 19132 : var.minecraft_port
-
-  container_image = var.minecraft_image != "" ? var.minecraft_image : (
-    local.is_bedrock ? "itzg/minecraft-bedrock-server:latest" : "itzg/minecraft-server:latest"
-  )
-
-  # itzg/minecraft-server environment. EULA + heap size are always set; anything
-  # in var.minecraft_env overrides/extends them (e.g. TYPE, VERSION, CF_API_KEY).
-  minecraft_environment = merge(
-    {
-      EULA   = "TRUE"
-      MEMORY = var.java_memory
-    },
-    var.minecraft_env,
-    # Curfew needs RCON reachable from the announcer sidecar. Merged LAST so the
-    # password always matches the one the sidecar was handed — a caller-supplied
-    # RCON_PASSWORD would otherwise silently break the in-game warnings. RCON
-    # stays bound to the task's network namespace; no port is opened.
-    local.curfew_announcer_enabled ? {
-      ENABLE_RCON   = "true"
-      RCON_PASSWORD = one(random_password.rcon[*].result)
-    } : {},
-  )
-
-  # Cartesian product of additional_ports x allowed_cidrs, keyed stably so the
-  # security-group for_each stays deterministic across plans.
-  additional_port_rules = {
-    for pair in setproduct(var.additional_ports, var.allowed_cidrs) :
-    "${pair[0].protocol}-${pair[0].port}-${pair[1]}" => {
-      port     = pair[0].port
-      protocol = pair[0].protocol
-      cidr     = pair[1]
-    }
-  }
-
-  # Seed plugin_configs onto the EFS volume via a one-shot init container. Each
-  # file's content is base64-encoded (safe to inline — no quoting hazards) and
-  # written only if absent, so edits by the server/plugins survive restarts.
-  seed_configs = length(var.plugin_configs) > 0
-  seed_script = join("\n", concat(["set -eu"], [
-    for path, content in var.plugin_configs :
-    "mkdir -p \"$(dirname '/data/${path}')\"; [ -e '/data/${path}' ] || echo '${base64encode(content)}' | base64 -d > '/data/${path}'"
-  ]))
 
   tags = merge(
     {
